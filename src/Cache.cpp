@@ -37,6 +37,7 @@
 #include "UserSettingsPage.h"
 #include "Utils.h"
 #include "encryption/Olm.h"
+#include <typeinfo>
 
 //! Should be changed when a breaking change occurs in the cache format.
 //! This will reset client's data.
@@ -1788,6 +1789,7 @@ isMessage(const mtx::events::RoomEvent<mtx::events::voip::CallHangUp> &)
 // }
 }
 
+
 void
 Cache::saveState(const mtx::responses::Sync &res)
 {
@@ -1816,10 +1818,17 @@ Cache::saveState(const mtx::responses::Sync &res)
                   }
 
                   auto j = nlohmann::json(event);
-                  accountDataDb.put(txn, j["type"].get<std::string>(), j.dump());
+                  try {
+                    accountDataDb.put(txn, j["type"].get<std::string>(), j.dump());
+                  }
+                  catch (const lmdb::error &e) {
+                    nhlog::db()->warn("failed to save state after sync: {}, skipping event", e.what());
+                    return;
+                  }
               },
               ev);
-    }
+    } 
+          
 
     auto userKeyCacheDb = getUserKeysDb(txn);
 
