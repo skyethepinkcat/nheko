@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -26,12 +24,25 @@ Item {
     property var roomPreview: null
     property bool showBackButton: false
     property bool shouldEffectsRun: false
+    required property PrivacyScreen privacyScreen
     clip: true
 
     onRoomChanged: if (room != null) room.triggerSpecialEffects()
 
+    StickerPicker {
+        id: emojiPopup
+
+        colors: Nheko.colors
+        emoji: true
+    }
+
     // focus message input on key press, but not on Ctrl-C and such.
-    Keys.onPressed: if (event.text && !topBar.searchHasFocus) TimelineManager.focusMessageInput();
+    Keys.onPressed: {
+        if (event.text && event.key !== Qt.Key_Enter && event.key !== Qt.Key_Return && !topBar.searchHasFocus) {
+            TimelineManager.focusMessageInput();
+            room.input.setText(room.input.text + event.text);
+        }
+    }
 
     Shortcut {
         sequence: StandardKey.Close
@@ -154,7 +165,20 @@ Item {
         UploadBox {
         }
 
-        NotificationWarning {
+        MessageInputWarning {
+            text: qsTr("You are about to notify the whole room")
+            visible: (room && room.permissions.canPingRoom() && room.input.containsAtRoom)
+        }
+
+        MessageInputWarning {
+            text: qsTr("The command /%1 is not recognized and will be sent as part of your message").arg(room ? room.input.currentCommand : "")
+            visible: room ? room.input.containsInvalidCommand && !room.input.containsIncompleteCommand : false
+        }
+
+        MessageInputWarning {
+            text: qsTr("/%1 looks like an incomplete command. To send it anyway, add a space to the end of your message.").arg(room ? room.input.currentCommand : "")
+            visible: room ? room.input.containsIncompleteCommand : false
+            bubbleColor: Nheko.theme.orange
         }
 
         ReplyPopup {
@@ -199,7 +223,7 @@ Item {
             Layout.alignment: Qt.AlignHCenter
 
             MatrixText {
-                text: preview.roomName == "" ? qsTr("No preview available") : preview.roomName
+                text: !roomPreview.isFetched ? qsTr("No preview available") : preview.roomName
                 font.pixelSize: 24
             }
 
@@ -240,7 +264,7 @@ Item {
             Layout.rightMargin: Nheko.paddingLarge
 
             TextArea {
-                text: TimelineManager.escapeEmoji(preview.roomTopic)
+                text: roomPreview.isFetched ? TimelineManager.escapeEmoji(preview.roomTopic) : qsTr("This room is possibly inaccessible. If this room is private, you should remove it from this community.")
                 wrapMode: TextEdit.WordWrap
                 textFormat: TextEdit.RichText
                 readOnly: true
@@ -278,6 +302,13 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("decline invite")
             onClicked: Rooms.declineInvite(roomPreview.roomid)
+        }
+
+        FlatButton {
+            visible: !!room
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("leave")
+            onClicked: TimelineManager.openLeaveRoomDialog(room.roomId)
         }
 
         ScrollView {
@@ -345,60 +376,10 @@ Item {
         onClicked: Rooms.resetCurrentRoom()
     }
 
-    ParticleSystem { id: confettiParticleSystem 
-        Component.onCompleted: pause();
-        paused: !shouldEffectsRun
-    }
+    TimelineEffects {
+        id: timelineEffects
 
-    Emitter {
-        id: confettiEmitter
-
-        width: parent.width * 3/4
-        enabled: false
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: parent.height
-        emitRate: Math.min(400 * Math.sqrt(parent.width * parent.height) / 870, 1000)
-        lifeSpan: 15000
-        system: confettiParticleSystem
-        maximumEmitted: 500
-        velocityFromMovement: 8
-        size: 16
-        sizeVariation: 4
-        velocity: PointDirection {
-            x: 0
-            y: -Math.min(450 * parent.height / 700, 1000)
-            xVariation: Math.min(4 * parent.width / 7, 450)
-            yVariation: 250
-        }
-    }
-
-    ImageParticle {
-        system: confettiParticleSystem
-        source: "qrc:/confettiparticle.svg"
-        rotationVelocity: 0
-        rotationVelocityVariation: 360
-        colorVariation: 1
-        color: "white"
-        entryEffect: ImageParticle.None
-        xVector: PointDirection {
-            x: 1
-            y: 0
-            xVariation: 0.2
-            yVariation: 0.2
-        }
-        yVector: PointDirection {
-            x: 0
-            y: 0.5
-            xVariation: 0.2
-            yVariation: 0.2
-        }
-    }
-
-    Gravity {
-        system: confettiParticleSystem
         anchors.fill: parent
-        magnitude: 350
-        angle: 90
     }
 
     NhekoDropArea {
@@ -409,7 +390,7 @@ Item {
     Timer {
         id: effectsTimer
         onTriggered: shouldEffectsRun = false;
-        interval: confettiEmitter.lifeSpan
+        interval: timelineEffects.maxLifespan
         repeat: false
         running: false
     }
@@ -425,11 +406,16 @@ Item {
         }
 
         function onShowRawMessageDialog(rawMessage) {
-            var dialog = Qt.createComponent("qrc:/qml/dialogs/RawMessageDialog.qml").createObject(timelineRoot, {
-                "rawMessage": rawMessage
-            });
-            dialog.show();
-            timelineRoot.destroyOnClose(dialog);
+            var component = Qt.createComponent("qrc:/qml/dialogs/RawMessageDialog.qml")
+            if (component.status == Component.Ready) {
+                var dialog = component.createObject(timelineRoot, {
+                    "rawMessage": rawMessage
+                });
+                dialog.show();
+                timelineRoot.destroyOnClose(dialog);
+            } else {
+                console.error("Failed to create component: " + component.errorString());
+            }
         }
 
         function onConfetti()
@@ -438,7 +424,7 @@ Item {
                 return
 
             shouldEffectsRun = true;
-            confettiEmitter.pulse(parent.height * 2)
+            timelineEffects.pulseConfetti()
             room.markSpecialEffectsDone()
         }
 
@@ -447,7 +433,25 @@ Item {
             if (!Settings.fancyEffects)
                 return
 
-            effectsTimer.start();
+            effectsTimer.restart();
+        }
+
+        function onRainfall()
+        {
+            if (!Settings.fancyEffects)
+                return
+
+            shouldEffectsRun = true;
+            timelineEffects.pulseRainfall()
+            room.markSpecialEffectsDone()
+        }
+
+        function onRainfallDone()
+        {
+            if (!Settings.fancyEffects)
+                return
+
+            effectsTimer.restart();
         }
 
         target: room

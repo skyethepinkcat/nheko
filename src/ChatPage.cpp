@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -96,6 +93,12 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
               if (err) {
                   emit connectionLost();
                   return;
+              }
+
+              // only update spaces every 20 minutes
+              if (lastSpacesUpdate < QDateTime::currentDateTime().addSecs(-20 * 60)) {
+                  lastSpacesUpdate = QDateTime::currentDateTime();
+                  utils::updateSpaceVias();
               }
 
               if (!isConnected_)
@@ -212,6 +215,12 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
         if (pushrules) {
             const auto local_user = utils::localUser().toStdString();
 
+            // Desktop notifications to be sent
+            std::vector<std::tuple<QSharedPointer<TimelineModel>,
+                                   mtx::events::collections::TimelineEvents,
+                                   std::string,
+                                   std::vector<mtx::pushrules::actions::Action>>>
+              notifications;
             for (const auto &[room_id, room] : sync.rooms.join) {
                 // clear old notifications
                 for (const auto &e : room.ephemeral.events) {
@@ -267,7 +276,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
 
                     auto ctx = roomModel->pushrulesRoomContext();
                     std::vector<
-                      std::pair<mtx::common::Relation, mtx::events::collections::TimelineEvent>>
+                      std::pair<mtx::common::Relation, mtx::events::collections::TimelineEvents>>
                       relatedEvents;
 
                     for (const auto &event : room.timeline.events) {
@@ -283,9 +292,9 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
                         if (sender == http::client()->user_id().to_string())
                             continue;
 
-                        mtx::events::collections::TimelineEvent te{event};
+                        mtx::events::collections::TimelineEvents te{event};
                         std::visit([room_id = room_id](auto &event_) { event_.room_id = room_id; },
-                                   te.data);
+                                   te);
 
                         if (auto encryptedEvent =
                               std::get_if<mtx::events::EncryptedEvent<mtx::events::msg::Encrypted>>(
@@ -295,23 +304,24 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
 
                             auto result = olm::decryptEvent(index, *encryptedEvent);
                             if (result.event)
-                                te.data = result.event.value();
+                                te = std::move(result.event).value();
                         }
 
                         relatedEvents.clear();
-                        for (const auto &r : mtx::accessors::relations(te.data).relations) {
+                        for (const auto &r : mtx::accessors::relations(te).relations) {
                             auto related = cache::client()->getEvent(room_id, r.event_id);
                             if (related) {
                                 relatedEvents.emplace_back(r, *related);
                                 if (auto encryptedEvent = std::get_if<
                                       mtx::events::EncryptedEvent<mtx::events::msg::Encrypted>>(
-                                      &related->data);
+                                      &related.value());
                                     encryptedEvent && userSettings_->decryptNotifications()) {
                                     MegolmSessionIndex index(room_id, encryptedEvent->content);
 
                                     auto result = olm::decryptEvent(index, *encryptedEvent);
                                     if (result.event)
-                                        relatedEvents.back().second.data = result.event.value();
+                                        relatedEvents.back().second =
+                                          std::move(result.event).value();
                                 }
                             }
                         }
@@ -330,29 +340,44 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
                                     continue;
 
                                 if (userSettings_->hasDesktopNotifications()) {
-                                    auto info = cache::singleRoomInfo(room_id);
-
-                                    AvatarProvider::resolve(
-                                      roomModel->roomAvatarUrl(),
-                                      96,
-                                      this,
-                                      [this, te, room_id = room_id, actions](QPixmap image) {
-                                          notificationsManager->postNotification(
-                                            mtx::responses::Notification{
-                                              .actions     = actions,
-                                              .event       = te.data,
-                                              .read        = false,
-                                              .profile_tag = "",
-                                              .room_id     = room_id,
-                                              .ts          = 0,
-                                            },
-                                            image.toImage());
-                                      });
+                                    notifications.emplace_back(roomModel, te, room_id, actions);
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (notifications.size() <= 5) {
+                for (const auto &[roomModel, te, room_id, actions] : notifications) {
+                    AvatarProvider::resolve(
+                      roomModel->roomAvatarUrl(),
+                      96,
+                      this,
+                      [this, te = te, room_id = room_id, actions = actions](QPixmap image) {
+                          notificationsManager->postNotification(
+                            mtx::responses::Notification{
+                              .actions     = actions,
+                              .event       = std::move(te),
+                              .read        = false,
+                              .profile_tag = "",
+                              .room_id     = room_id,
+                              .ts          = 0,
+                            },
+                            image.toImage());
+                      });
+                }
+            } else if (!notifications.empty()) {
+                std::map<QSharedPointer<TimelineModel>, std::size_t> missedEvents;
+                for (const auto &[roomModel, te, room_id, actions] : notifications) {
+                    missedEvents[roomModel]++;
+                }
+                QString body;
+                for (const auto &[roomModel, nbNotifs] : missedEvents) {
+                    body += tr("%n unread message(s) in room %1\n", nullptr, nbNotifs)
+                              .arg(roomModel->roomName());
+                }
+                emit notificationsManager->systemPostNotificationCb(
+                  "", "", "New messages while away", body, QImage());
             }
         }
     });
@@ -381,6 +406,13 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QObject *parent)
           disconnect(
             this, &ChatPage::newSyncResponse, this, &ChatPage::startRemoveFallbackKeyTimer);
       },
+      Qt::QueuedConnection);
+
+    connect(
+      this,
+      &ChatPage::callFunctionOnGuiThread,
+      this,
+      [](std::function<void()> f) { f(); },
       Qt::QueuedConnection);
 
     connectCallMessage<mtx::events::voip::CallInvite>();
@@ -1664,7 +1696,7 @@ ChatPage::isRoomActive(const QString &room_id)
 void
 ChatPage::removeAllNotifications()
 {
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
     notificationsManager->closeAllNotifications();
 #endif
 }

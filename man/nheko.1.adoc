@@ -91,11 +91,9 @@ Open username completer.
 Open room completer.
 
 *:*::
-Open unicode emoji picker.
-
-*~*::
-Open custom emoji picker. Requires an image pack with custom emojis. Selecting
-an emoji will add HTML code for the inline image into the input line.
+Open the emoji picker. Unicode emoji are inserted directly. Custom emoji will
+insert the HTML code for them into the input line. You can configure custom
+emoji in the room settings.
 
 == KEYBOARD SHORTCUTS
 
@@ -271,6 +269,12 @@ Make text strikethrough. HTML putput: `<del>text</del>`
 Hide text and set an optional spoiler warning. Note that Nheko does not display
 the spoiler warning currently. HTML output:
 `<span data-mx-spoiler="spoiler">text</span>`
+
+== ENVIRONMENT
+
+*NHEKO_ALLOW_QML_DISK_CACHE*::
+Nheko by default disables the qml disk cache to prevent crashes. This allows
+you to reenable it at your own risk.
 
 == FILES
 

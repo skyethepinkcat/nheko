@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -23,7 +21,7 @@ Control {
     property int avatarHeight: 24
     property int avatarWidth: 24
     property int rowMargin: 0
-    property int rowSpacing: 5
+    property int rowSpacing: Nheko.paddingSmall
     property alias count: listView.count
 
     signal completionClicked(string completion)
@@ -127,6 +125,8 @@ Control {
         delegate: Rectangle {
             property variant modelData: model
 
+            ListView.delayRemove: true
+
             color: model.index == popup.currentIndex ? Nheko.colors.highlight : Nheko.colors.base
             height: chooser.child.implicitHeight + 2 * popup.rowMargin
             implicitWidth: fullWidth ? ListView.view.width : chooser.child.implicitWidth + 4
@@ -199,14 +199,33 @@ Control {
                         spacing: rowSpacing
 
                         Label {
+                            visible: !!model.unicode
                             text: model.unicode
                             color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.text
                             font: Settings.emojiFont
                         }
 
+                        Avatar {
+                            visible: !model.unicode
+                            height: popup.avatarHeight
+                            width: popup.avatarWidth
+                            displayName: model.shortcode
+                            //userid: model.shortcode
+                            url: (model.url ? model.url : "").replace("mxc://", "image://MxcImage/")
+                            enabled: false
+                            crop: false
+                        }
+
                         Label {
-                            text: model.shortName
+                            Layout.leftMargin: Nheko.paddingSmall
+                            Layout.rightMargin: Nheko.paddingSmall
+                            text: model.shortcode
                             color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.text
+                        }
+
+                        Label {
+                            text: "(" + model.packname + ")"
+                            color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.buttonText
                         }
 
                     }
@@ -238,39 +257,6 @@ Control {
                 }
 
                 DelegateChoice {
-                    roleValue: "customEmoji"
-
-                    RowLayout {
-                        id: del
-
-                        anchors.centerIn: parent
-                        spacing: rowSpacing
-
-                        Avatar {
-                            height: popup.avatarHeight
-                            width: popup.avatarWidth
-                            displayName: model.shortcode
-                            //userid: model.shortcode
-                            url: model.url.replace("mxc://", "image://MxcImage/")
-                            enabled: false
-                            crop: false
-                        }
-
-                        Label {
-                            text: model.shortcode
-                            color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.text
-                        }
-
-                        Label {
-                            text: "(" + model.packname + ")"
-                            color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.buttonText
-                        }
-
-                    }
-
-                }
-
-                DelegateChoice {
                     roleValue: "room"
 
                     RowLayout {
@@ -292,6 +278,7 @@ Control {
                             text: model.roomName
                             font.pixelSize: popup.avatarHeight * 0.5
                             color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.text
+                            font.italic: model.isTombstoned
                             textFormat: Text.RichText
                         }
 
@@ -320,6 +307,7 @@ Control {
                         Label {
                             text: model.roomName
                             color: model.index == popup.currentIndex ? Nheko.colors.highlightedText : Nheko.colors.text
+                            font.italic: model.isTombstoned
                             textFormat: Text.RichText
                         }
 

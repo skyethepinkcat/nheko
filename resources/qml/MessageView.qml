@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -126,8 +124,6 @@ Item {
                 }
 
                 ImageButton {
-                    id: editButton
-
                     visible: !!row.model && row.model.isEditable
                     buttonTextColor: Nheko.colors.buttonText
                     width: 16
@@ -151,16 +147,14 @@ Item {
                     ToolTip.visible: hovered
                     ToolTip.delay: Nheko.tooltipDelay
                     ToolTip.text: qsTr("React")
-                    onClicked: emojiPopup.visible ? emojiPopup.close() : emojiPopup.show(reactButton, function(emoji) {
+                    onClicked: emojiPopup.visible ? emojiPopup.close() : emojiPopup.show(reactButton, room.roomId, function(plaintext, markdown) {
                         var event_id = row.model ? row.model.eventId : "";
-                        room.input.reaction(event_id, emoji);
+                        room.input.reaction(event_id, plaintext);
                         TimelineManager.focusMessageInput();
                     })
                 }
 
                 ImageButton {
-                    id: threadButton
-
                     visible: room ? room.permissions.canSend(MtxEvent.TextMessage) : false
                     width: 16
                     hoverEnabled: true
@@ -172,8 +166,6 @@ Item {
                 }
 
                 ImageButton {
-                    id: replyButton
-
                     visible: room ? room.permissions.canSend(MtxEvent.TextMessage) : false
                     width: 16
                     hoverEnabled: true
@@ -182,6 +174,21 @@ Item {
                     ToolTip.delay: Nheko.tooltipDelay
                     ToolTip.text: qsTr("Reply")
                     onClicked: room.reply = row.model.eventId
+                }
+
+                ImageButton {
+                    visible: !!row.model && filteredTimeline.filterByContent
+                    buttonTextColor: Nheko.colors.buttonText
+                    width: 16
+                    hoverEnabled: true
+                    image: ":/icons/icons/ui/go-to.svg"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: Nheko.tooltipDelay
+                    ToolTip.text: qsTr("Go to message")
+                    onClicked: {
+                        topBar.searchString = "";
+                        room.showEvent(row.model.eventId);
+                    }
                 }
 
                 ImageButton {
@@ -208,7 +215,7 @@ Item {
         Shortcut {
             sequence: StandardKey.MoveToPreviousPage
             onActivated: {
-                chat.contentY = chat.contentY - chat.height / 2;
+                chat.contentY = chat.contentY - chat.height * 0.9;
                 chat.returnToBounds();
             }
         }
@@ -216,7 +223,7 @@ Item {
         Shortcut {
             sequence: StandardKey.MoveToNextPage
             onActivated: {
-                chat.contentY = chat.contentY + chat.height / 2;
+                chat.contentY = chat.contentY + chat.height * 0.9;
                 chat.returnToBounds();
             }
         }
@@ -348,6 +355,7 @@ Item {
                     }
                     property int remainingWidth: chat.delegateMaxWidth - spacing - messageUserAvatar.width
                     AbstractButton {
+                        id: userNameButton
                         contentItem: ElidedLabel {
                             id: userName_
                             fullText: userName
@@ -373,18 +381,27 @@ Item {
 
                     Label {
                         id: statusMsg
+                        anchors.baseline: userNameButton.baseline
                         color: Nheko.colors.buttonText
-                        text: Presence.userStatus(userId)
+                        text: userStatus.replace(/\n/g, " ")
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
-                        width: userInfo.remainingWidth - userName_.width - parent.spacing
+                        width: Math.min(implicitWidth, userInfo.remainingWidth - userName_.width - parent.spacing)
                         font.italic: true
+                        font.pointSize: Math.floor(fontMetrics.font.pointSize * 0.8)
+                        ToolTip.text: qsTr("%1's status message").arg(userName)
+                        ToolTip.visible: statusMsgHoverHandler.hovered
+                        ToolTip.delay: Nheko.tooltipDelay
 
+                        HoverHandler {
+                            id: statusMsgHoverHandler
+                        }
+
+                        property string userStatus: Presence.userStatus(userId)
                         Connections {
                             target: Presence
-
                             function onPresenceChanged(id) {
-                                if (id == userId) statusMsg.text = Presence.userStatus(userId);
+                                if (id == userId) statusMsg.userStatus = Presence.userStatus(userId);
                             }
                         }
                     }
@@ -441,6 +458,7 @@ Item {
             anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
             width: chat.delegateMaxWidth
             height: section.active ? section.height + timelinerow.height : timelinerow.height
+            ListView.delayRemove: true
 
             Loader {
                 id: section
@@ -639,6 +657,16 @@ Item {
         }
 
         Platform.MenuItem {
+             visible: filteredTimeline.filterByContent
+             enabled: visible
+             text: qsTr("Go to &message")
+             onTriggered: function() {
+                topBar.searchString = "";
+                room.showEvent(messageContextMenu.eventId);
+            }
+         }
+
+        Platform.MenuItem {
             visible: messageContextMenu.text
             enabled: visible
             text: qsTr("&Copy")
@@ -657,8 +685,9 @@ Item {
 
             visible: room ? room.permissions.canSend(MtxEvent.Reaction) : false
             text: qsTr("Re&act")
-            onTriggered: emojiPopup.show(null, function(emoji) {
-                room.input.reaction(messageContextMenu.eventId, emoji);
+            onTriggered: emojiPopup.visible ? emojiPopup.close() : emojiPopup.show(null, room.roomId, function(plaintext, markdown) {
+                room.input.reaction(messageContextMenu.eventId, plaintext);
+                TimelineManager.focusMessageInput();
             })
         }
 
@@ -813,7 +842,7 @@ Item {
         width: 0
         height: width
         radius: width/2
-        onClicked: chat.positionViewAtBeginning();
+        onClicked: function() { chat.positionViewAtBeginning(); TimelineManager.focusMessageInput(); }
         flat: true
         hoverEnabled: true
 

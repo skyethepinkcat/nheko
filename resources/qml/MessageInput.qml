@@ -1,11 +1,10 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import "./emoji"
 import "./voip"
+import "./ui"
 import QtQuick 2.12
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.2
@@ -14,6 +13,8 @@ import im.nheko 1.0
 
 Rectangle {
     id: inputBar
+
+    readonly property string text: messageInput.text
 
     color: Nheko.colors.window
     Layout.fillWidth: true
@@ -92,8 +93,9 @@ Rectangle {
                 color: Nheko.colors.window
                 visible: room && room.input.uploading
 
-                NhekoBusyIndicator {
-                    anchors.fill: parent
+                Spinner {
+                    anchors.centerIn: parent
+                    height: parent.height / 2
                     running: parent.visible
                 }
 
@@ -167,8 +169,6 @@ Rectangle {
                         messageInput.openCompleter(selectionStart-1, "emoji");
                     } else if (lastChar == '#') {
                         messageInput.openCompleter(selectionStart-1, "roomAliases");
-                    } else if (lastChar == "~") {
-                        messageInput.openCompleter(selectionStart-1, "customEmoji");
                     } else if (lastChar == "/" && cursorPosition == 1) {
                         messageInput.openCompleter(selectionStart-1, "command");
                     }
@@ -431,7 +431,7 @@ Rectangle {
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Stickers")
             onClicked: stickerPopup.visible ? stickerPopup.close() : stickerPopup.show(stickerButton, room.roomId, function(row) {
-                room.input.sticker(stickerPopup.model.sourceModel, row);
+                room.input.sticker(row);
                 TimelineManager.focusMessageInput();
             })
 
@@ -439,6 +439,7 @@ Rectangle {
                 id: stickerPopup
 
                 colors: Nheko.colors
+                emoji: false
             }
 
         }
@@ -454,10 +455,17 @@ Rectangle {
             image: ":/icons/icons/ui/smile.svg"
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Emoji")
-            onClicked: emojiPopup.visible ? emojiPopup.close() : emojiPopup.show(emojiButton, function(emoji) {
-                messageInput.insert(messageInput.cursorPosition, emoji);
+            onClicked: emojiPopup.visible ? emojiPopup.close() : emojiPopup.show(emojiButton, room.roomId, function(plaintext, markdown) {
+                messageInput.insert(messageInput.cursorPosition, markdown);
                 TimelineManager.focusMessageInput();
             })
+
+            StickerPicker {
+                id: emojiPopup
+
+                colors: Nheko.colors
+                emoji: true
+            }
         }
 
         ImageButton {

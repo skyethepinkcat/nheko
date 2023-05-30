@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -16,10 +14,12 @@ Image {
     property int trust: Crypto.Unverified
     property string unencryptedIcon: ":/icons/icons/ui/shield-filled-cross.svg"
     property color unencryptedColor: Nheko.theme.error
+    property color unencryptedHoverColor: unencryptedColor
+    property bool hovered: ma.hovered
 
     property string sourceUrl: {
         if (!encrypted)
-        return "image://colorimage/"+unencryptedIcon+"?";
+        return "image://colorimage/" + unencryptedIcon + "?";
 
         switch (trust) {
             case Crypto.Verified:
@@ -48,10 +48,10 @@ Image {
                 return sourceUrl + Nheko.theme.error;
             }
         } else {
-            return sourceUrl + unencryptedColor;
+            return sourceUrl + (stateImg.hovered ? unencryptedHoverColor : unencryptedColor);
         }
     }
-    ToolTip.visible: ma.hovered
+    ToolTip.visible: stateImg.hovered
     ToolTip.text: {
         if (!encrypted)
             return qsTr("This message is not encrypted!");

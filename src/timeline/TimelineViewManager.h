@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -21,9 +19,6 @@
 #include "ui/RoomSettings.h"
 #include "ui/UserProfile.h"
 
-class MxcImageProvider;
-class BlurhashProvider;
-class ColorImageProvider;
 class UserSettings;
 class ChatPage;
 class ImagePackListModel;
@@ -61,6 +56,7 @@ public:
                                       double proportionalHeight);
     Q_INVOKABLE void openImagePackSettings(QString roomid);
     Q_INVOKABLE void saveMedia(QString mxcUrl);
+    Q_INVOKABLE void copyImage(const QString &mxcUrl) const;
     Q_INVOKABLE QColor userColor(QString id, QColor background);
     Q_INVOKABLE QString escapeEmoji(QString str) const;
     Q_INVOKABLE QString htmlEscape(QString str) const { return str.toHtmlEscaped(); }
@@ -118,7 +114,7 @@ public slots:
 
     QObject *completerFor(const QString &completerName,
                           const QString &roomId = QLatin1String(QLatin1String("")));
-    void forwardMessageToRoom(mtx::events::collections::TimelineEvents *e, QString roomId);
+    void forwardMessageToRoom(mtx::events::collections::TimelineEvents const *e, QString roomId);
 
     RoomlistModel *rooms() { return rooms_; }
 

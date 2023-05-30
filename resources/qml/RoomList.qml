@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -110,17 +108,21 @@ Page {
                 }
 
                 TimelineView {
-                    id: timelineView
+                    id: timeline
+
+                    privacyScreen: privacyScreen
                     anchors.fill: parent
                     room: roomWindowW.room
                     roomPreview: roomWindowW.roomPreview.roomid ? roomWindowW.roomPreview : null
                 }
 
                 PrivacyScreen {
+                    id: privacyScreen
+
                     anchors.fill: parent
                     visible: Settings.privacyScreen
                     screenTimeout: Settings.privacyScreenTimeout
-                    timelineRoot: timelineView
+                    timelineRoot: timeline
                     windowTarget: roomWindowW
                 }
 
@@ -472,11 +474,14 @@ Page {
 
             function openUserProfile() {
                 Nheko.updateUserProfile();
-                var userProfile = Qt.createComponent("qrc:/qml/dialogs/UserProfile.qml").createObject(timelineRoot, {
-                    "profile": Nheko.currentUser
-                });
-                userProfile.show();
-                timelineRoot.destroyOnClose(userProfile);
+                var component = Qt.createComponent("qrc:/qml/dialogs/UserProfile.qml")
+                if (component.status == Component.Ready) {
+                    var userProfile = component.createObject(timelineRoot, {"profile": Nheko.currentUser});
+                    userProfile.show();
+                    timelineRoot.destroyOnClose(userProfile);
+                } else {
+                    console.error("Failed to create component: " + component.errorString());
+                }
             }
 
 
@@ -792,9 +797,14 @@ Page {
                     ToolTip.text: qsTr("Search rooms (Ctrl+K)")
                     Layout.margins: Nheko.paddingMedium
                     onClicked: {
-                        var quickSwitch = Qt.createComponent("qrc:/qml/QuickSwitcher.qml").createObject(timelineRoot);
-                        quickSwitch.open();
-                        destroyOnClosed(quickSwitch);
+                        var component = Qt.createComponent("qrc:/qml/QuickSwitcher.qml")
+                        if (component.status == Component.Ready) {
+                            var quickSwitch = component.createObject(timelineRoot);
+                            quickSwitch.open();
+                            destroyOnClosed(quickSwitch);
+                        } else {
+                            console.error("Failed to create component: " + component.errorString());
+                        }
                     }
                 }
 

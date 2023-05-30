@@ -2,11 +2,11 @@ nheko
 ----
 [![Build Status](https://nheko.im/nheko-reborn/nheko/badges/master/pipeline.svg)](https://nheko.im/nheko-reborn/nheko/-/pipelines/latest)
 [![Build status](https://ci.appveyor.com/api/projects/status/07qrqbfylsg4hw2h/branch/master?svg=true)](https://ci.appveyor.com/project/redsky17/nheko/branch/master)
-[![Stable Version](https://img.shields.io/badge/download-stable-green.svg)](https://github.com/Nheko-Reborn/nheko/releases/v0.8.2-RC)
+[![Stable Version](https://img.shields.io/badge/download-stable-green.svg)](https://github.com/Nheko-Reborn/nheko/releases/latest)
 [![Nightly](https://img.shields.io/badge/download-nightly-green.svg)](https://matrix-static.neko.dev/room/!TshDrgpBNBDmfDeEGN:neko.dev/)
 <a href='https://flatpak.neko.dev/repo/nightly/appstream/io.github.NhekoReborn.Nheko.flatpakref' download='nheko-nightly.flatpakref'><img alt='Download Nightly Flatpak' src='https://img.shields.io/badge/download-flatpak--nightly-green'/></a>
 [![#nheko-reborn:matrix.org](https://img.shields.io/matrix/nheko-reborn:matrix.org.svg?label=%23nheko-reborn:matrix.org)](https://matrix.to/#/#nheko-reborn:matrix.org)
-[![AUR: nheko](https://img.shields.io/badge/AUR-nheko-blue.svg)](https://aur.archlinux.org/packages/nheko)
+[![Arch package](https://repology.org/badge/version-for-repo/arch/nheko.svg)](https://archlinux.org/packages/community/x86_64/nheko/)
 <a href='https://flathub.org/apps/details/io.github.NhekoReborn.Nheko'><img width='240' alt='Download on Flathub' src='https://flathub.org/assets/badges/flathub-badge-en.png'/></a>
 
 The motivation behind the project is to provide a native desktop app for [Matrix] that
@@ -59,24 +59,16 @@ can be found in the [GitHub releases](https://github.com/Nheko-Reborn/nheko/rele
 #### Arch Linux
 
 ```bash
-pacaur -S nheko # nheko-git
-```
-
-Nheko requires a secret server to run, so you'll need to install and configure a service such as [KDE Wallet](https://wiki.archlinux.org/title/KDE_Wallet) or [GNOME Keyring](https://wiki.archlinux.org/title/GNOME/Keyring) if not provided by your desktop environment.
-
-Binary releases of the stable builds are available (using [Open Build Service](https://build.opensuse.org/)). To add this [unofficial repository](https://wiki.archlinux.org/title/Unofficial_user_repositories), execute the following block after reviewing the [PKGBUILD and service files](https://build.opensuse.org/package/show/home:digital_mystik:AUR/nheko):
-
-```
-curl -s 'https://download.opensuse.org/repositories/home:/digital_mystik:/AUR/Arch/x86_64/home_digital_mystik_AUR_Arch.key' | sudo pacman-key -a - && sudo pacman-key --lsign-key 4D41B287F3ABC4B8
-echo '
-[home_digital_mystik_AUR_Arch]
-Server = https://download.opensuse.org/repositories/home:/digital_mystik:/AUR/Arch/x86_64/' | sudo tee --append /etc/pacman.conf
 sudo pacman -Syu nheko
 ```
 
-This imports the repository's public PGP key and locally signs it, adds the pertinent entry to `/etc/pacman.conf`, and installs nheko after updating the databases/system; one can now treat nheko as a typical package. 
+The development version is available in the AUR:
 
-To undo these changes, delete the repository entry from `/etc/pacman.conf`, and remove the public signing key with `sudo pacman-key -d 4D41B287F3ABC4B8`.
+```bash
+pacaur -S nheko-git
+```
+
+Nheko requires a secret server to run, so you'll need to install and configure a service such as [KDE Wallet](https://wiki.archlinux.org/title/KDE_Wallet) or [GNOME Keyring](https://wiki.archlinux.org/title/GNOME/Keyring) if not provided by your desktop environment.
 
 #### Debian (10 and above) / Ubuntu (18.04 and above)
 
@@ -260,8 +252,8 @@ KDE has similar plugins, that can extend the supported image types even more.
 - XCB, XCB-EWMH: For screensharing support on X11. VOIP needs to be enabled. Can be disabled with `-DSCREENSHARE_X11=OFF`.
 - [qtkeychain](https://github.com/frankosterfeld/qtkeychain) (You need at least version 0.12 for proper Gnome Keychain support. The bundled version requires libsecret, unless you pass `-DLIBSECRET_SUPPORT=OFF`.)
 - A compiler that supports C++ 20:
-    - Clang 11 (Only clazy 13 is tested in CI)
-    - GCC 10 (tested on Gitlab CI)
+    - Clang 16 (Only clazy 16 is tested in CI)
+    - GCC 11 (tested on Gitlab CI)
     - MSVC 19.13 (tested on AppVeyor)
 
 Nheko can use bundled version for most of those libraries automatically, if the versions in your distro are too old.
@@ -317,7 +309,7 @@ sudo pacman -S qt5-base \
 ```bash
 sudo apt install --no-install-recommends g++ cmake make zlib1g-dev libssl-dev libolm-dev liblmdb-dev libcmark-dev nlohmann-json3-dev libspdlog-dev libevent-dev libcurl4-openssl-dev libre2-dev libxcb-ewmh-dev asciidoc-base \
 qt{base,declarative,tools,multimedia,quickcontrols2-}5-dev libqt5svg5-dev qt5keychain-dev qml-module-qt{gstreamer,multimedia,quick-extras,-labs-settings,-labs-platform,graphicaleffects,quick-controls2,quick-particles2} \
-libgstreamer1.0-dev libgstreamer-plugins-{base,bad}1.0-dev qtgstreamer-plugins-qt5 libnice-dev
+libgstreamer1.0-dev libgstreamer-plugins-{base,bad}1.0-dev qtgstreamer-plugins-qt5 libnice-dev ninja-build
 ```
 lmdb++-dev is too old so bundled lmdbxx must be used.  
 libspdlog-dev in debian bullseye is too old (without backporting) so requires using hunter to use bundled spdlog.  

@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,6 +32,7 @@ class RoomPreview
     Q_PROPERTY(QString roomAvatarUrl READ roomAvatarUrl CONSTANT)
     Q_PROPERTY(QString reason READ reason CONSTANT)
     Q_PROPERTY(bool isInvite READ isInvite CONSTANT)
+    Q_PROPERTY(bool isFetched READ isFetched CONSTANT)
 
 public:
     RoomPreview() {}
@@ -44,9 +43,10 @@ public:
     QString roomAvatarUrl() const { return roomAvatarUrl_; }
     QString reason() const { return reason_; }
     bool isInvite() const { return isInvite_; }
+    bool isFetched() const { return isFetched_; }
 
     QString roomid_, roomName_, roomAvatarUrl_, roomTopic_, reason_;
-    bool isInvite_ = false;
+    bool isInvite_ = false, isFetched_ = true;
 };
 
 class RoomlistModel final : public QAbstractListModel
@@ -230,6 +230,7 @@ private:
     short int calculateImportance(const QModelIndex &idx) const;
     RoomlistModel *roomlistmodel;
     bool sortByImportance = true;
+    bool sortByAlphabet   = false;
 
     enum class FilterBy
     {

@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -47,7 +45,7 @@ CompletionProxyModel::CompletionProxyModel(QAbstractItemModel *model,
         auto string1 = sourceModel()
                          ->data(sourceModel()->index(i, 0), CompletionModel::SearchRole)
                          .toString()
-                         .toLower();
+                         .toCaseFolded();
         if (!string1.isEmpty()) {
             trie_.insert<ElementRank::first>(string1.toUcs4(), i);
             insertParts(string1, i);
@@ -56,7 +54,7 @@ CompletionProxyModel::CompletionProxyModel(QAbstractItemModel *model,
         auto string2 = sourceModel()
                          ->data(sourceModel()->index(i, 0), CompletionModel::SearchRole2)
                          .toString()
-                         .toLower();
+                         .toCaseFolded();
         if (!string2.isEmpty()) {
             trie_.insert<ElementRank::first>(string2.toUcs4(), i);
             insertParts(string2, i);
@@ -76,7 +74,7 @@ CompletionProxyModel::CompletionProxyModel(QAbstractItemModel *model,
       &CompletionProxyModel::newSearchString,
       this,
       [this](const QString &s) {
-          searchString_ = s.toLower();
+          searchString_ = s.toCaseFolded();
           invalidate();
       },
       Qt::QueuedConnection);

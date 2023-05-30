@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,6 +7,9 @@
 // Class for showing a limited amount of completions at a time
 
 #include <QAbstractProxyModel>
+
+#include <algorithm>
+#include <span>
 
 enum class ElementRank
 {
@@ -19,7 +20,7 @@ enum class ElementRank
 template<typename Key, typename Value>
 struct trie
 {
-    std::vector<Value> values;
+    std::vector<std::pair<ElementRank, Value>> values;
     std::map<Key, trie> next;
 
     template<ElementRank r>
@@ -31,9 +32,11 @@ struct trie
         }
 
         if constexpr (r == ElementRank::first) {
-            t->values.insert(t->values.begin(), v);
+            auto it =
+              std::ranges::upper_bound(t->values, r, {}, &std::pair<ElementRank, Value>::first);
+            t->values.emplace(it, r, v);
         } else if constexpr (r == ElementRank::second) {
-            t->values.push_back(v);
+            t->values.emplace_back(r, v);
         }
     }
 
@@ -47,7 +50,7 @@ struct trie
             if (ret.size() >= limit)
                 return ret;
             else
-                ret.push_back(v);
+                ret.push_back(v.second);
         }
 
         for (const auto &[k, t] : next) {
@@ -70,7 +73,7 @@ struct trie
         return ret;
     }
 
-    std::vector<Value> search(const QVector<Key> &keys, //< TODO(Nico): replace this with a span
+    std::vector<Value> search(const std::span<Key> &keys,
                               size_t result_count_limit,
                               size_t max_edit_distance_ = 2) const
     {
@@ -78,7 +81,7 @@ struct trie
         if (!result_count_limit)
             return ret;
 
-        if (keys.isEmpty())
+        if (keys.empty())
             return valuesAndSubvalues(result_count_limit);
 
         auto append = [&ret, result_count_limit](std::vector<Value> &&in) {
@@ -116,7 +119,7 @@ struct trie
                     }
 
                     if (t) {
-                        append(t->search(keys.mid(2), limit(), max_edit_distance));
+                        append(t->search(keys.subspan(2), limit(), max_edit_distance));
                     }
                 }
 
@@ -132,7 +135,7 @@ struct trie
                 }
 
                 // delete character case
-                append(this->search(keys.mid(1), limit(), max_edit_distance));
+                append(this->search(keys.subspan(1), limit(), max_edit_distance));
 
                 // substitute case
                 for (const auto &[k, t] : this->next) {
@@ -142,14 +145,14 @@ struct trie
                         break;
 
                     // substitute
-                    append(t.search(keys.mid(1), limit(), max_edit_distance));
+                    append(t.search(keys.subspan(1), limit(), max_edit_distance));
                 }
 
                 max_edit_distance += 1;
             }
 
             if (auto e = this->next.find(keys[0]); e != this->next.end()) {
-                append(e->second.search(keys.mid(1), limit(), max_edit_distance));
+                append(e->second.search(keys.subspan(1), limit(), max_edit_distance));
             }
         }
 

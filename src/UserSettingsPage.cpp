@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -82,6 +79,7 @@ UserSettings::load(std::optional<QString> profile)
     typingNotifications_ =
       settings.value(QStringLiteral("user/typing_notifications"), true).toBool();
     sortByImportance_ = settings.value(QStringLiteral("user/sort_by_unread"), true).toBool();
+    sortByAlphabet_   = settings.value(QStringLiteral("user/sort_by_alphabet"), false).toBool();
     readReceipts_     = settings.value(QStringLiteral("user/read_receipts"), true).toBool();
     theme_            = settings.value(QStringLiteral("user/theme"), defaultTheme_).toString();
 
@@ -101,6 +99,8 @@ UserSettings::load(std::optional<QString> profile)
     privacyScreenTimeout_ =
       settings.value(QStringLiteral("user/privacy_screen_timeout"), 0).toInt();
     exposeDBusApi_ = settings.value(QStringLiteral("user/expose_dbus_api"), false).toBool();
+    updateSpaceVias_ =
+      settings.value(QStringLiteral("user/space_background_maintenance"), true).toBool();
 
     mobileMode_ = settings.value(QStringLiteral("user/mobile_mode"), false).toBool();
     emojiFont_  = settings.value(QStringLiteral("user/emoji_font_family"), "emoji").toString();
@@ -140,6 +140,7 @@ UserSettings::load(std::optional<QString> profile)
     homeserver_    = settings.value(prefix + "auth/home_server", "").toString();
     userId_        = settings.value(prefix + "auth/user_id", "").toString();
     deviceId_      = settings.value(prefix + "auth/device_id", "").toString();
+    currentTagId_  = settings.value(prefix + "user/current_tag_id", "").toString();
     hiddenTags_    = settings.value(prefix + "user/hidden_tags", QStringList{}).toStringList();
     mutedTags_  = settings.value(prefix + "user/muted_tags", QStringList{"global"}).toStringList();
     hiddenPins_ = settings.value(prefix + "user/hidden_pins", QStringList{}).toStringList();
@@ -297,6 +298,17 @@ UserSettings::setExposeDBusApi(bool state)
 }
 
 void
+UserSettings::setUpdateSpaceVias(bool state)
+{
+    if (updateSpaceVias_ == state)
+        return;
+
+    updateSpaceVias_ = state;
+    emit updateSpaceViasChanged(state);
+    save();
+}
+
+void
 UserSettings::setMarkdown(bool state)
 {
     if (state == markdown_)
@@ -373,7 +385,17 @@ UserSettings::setSortByImportance(bool state)
     if (state == sortByImportance_)
         return;
     sortByImportance_ = state;
-    emit roomSortingChanged(state);
+    emit roomSortingChangedImportance(state);
+    save();
+}
+
+void
+UserSettings::setSortByAlphabet(bool state)
+{
+    if (state == sortByAlphabet_)
+        return;
+    sortByAlphabet_ = state;
+    emit roomSortingChangedAlphabetical(state);
     save();
 }
 
@@ -769,6 +791,15 @@ UserSettings::setDeviceId(QString deviceId)
 }
 
 void
+UserSettings::setCurrentTagId(const QString currentTagId)
+{
+    if (currentTagId == currentTagId_)
+        return;
+    currentTagId_ = currentTagId;
+    save();
+}
+
+void
 UserSettings::setHomeserver(QString homeserver)
 {
     if (homeserver == homeserver_)
@@ -872,6 +903,7 @@ UserSettings::save()
     settings.setValue(QStringLiteral("font_size"), baseFontSize_);
     settings.setValue(QStringLiteral("typing_notifications"), typingNotifications_);
     settings.setValue(QStringLiteral("sort_by_unread"), sortByImportance_);
+    settings.setValue(QStringLiteral("sort_by_alphabet"), sortByAlphabet_);
     settings.setValue(QStringLiteral("minor_events"), sortByImportance_);
     settings.setValue(QStringLiteral("read_receipts"), readReceipts_);
     settings.setValue(QStringLiteral("group_view"), groupView_);
@@ -904,6 +936,7 @@ UserSettings::save()
     settings.setValue(QStringLiteral("open_image_external"), openImageExternal_);
     settings.setValue(QStringLiteral("open_video_external"), openVideoExternal_);
     settings.setValue(QStringLiteral("expose_dbus_api"), exposeDBusApi_);
+    settings.setValue(QStringLiteral("space_background_maintenance"), updateSpaceVias_);
 
     settings.endGroup(); // user
 
@@ -914,7 +947,7 @@ UserSettings::save()
     settings.setValue(prefix + "auth/home_server", homeserver_);
     settings.setValue(prefix + "auth/user_id", userId_);
     settings.setValue(prefix + "auth/device_id", deviceId_);
-
+    settings.setValue(prefix + "user/current_tag_id", currentTagId_);
     settings.setValue(prefix + "user/automatically_share_keys_with_trusted_users",
                       shareKeysWithTrustedUsers_);
     settings.setValue(prefix + "user/only_share_keys_with_verified_users",
@@ -999,6 +1032,8 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
             return tr("Typing notifications");
         case SortByImportance:
             return tr("Sort rooms by unreads");
+        case SortByAlphabet:
+            return tr("Sort rooms alphabetically");
         case ButtonsInTimeline:
             return tr("Show buttons in timeline");
         case TimelineMaxWidth:
@@ -1105,6 +1140,8 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
             return tr("Master signing key");
         case ExposeDBusApi:
             return tr("Expose room information via D-Bus");
+        case UpdateSpaceVias:
+            return tr("Periodically update community routing information");
         }
     } else if (role == Value) {
         switch (index.row()) {
@@ -1143,6 +1180,8 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
             return i->typingNotifications();
         case SortByImportance:
             return i->sortByImportance();
+        case SortByAlphabet:
+            return i->sortByAlphabet();
         case ButtonsInTimeline:
             return i->buttonsInTimeline();
         case TimelineMaxWidth:
@@ -1238,6 +1277,8 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
             return cache::secret(mtx::secret_storage::secrets::cross_signing_master).has_value();
         case ExposeDBusApi:
             return i->exposeDBusApi();
+        case UpdateSpaceVias:
+            return i->updateSpaceVias();
         }
     } else if (role == Description) {
         switch (index.row()) {
@@ -1297,11 +1338,18 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
         case SortByImportance:
             return tr(
               "Display rooms with new messages first.\nIf this is off, the list of rooms will only "
-              "be sorted by the timestamp of the last message in a room.\nIf this is on, rooms "
+              "be sorted by the preferred sorting order.\nIf this is on, rooms "
               "which "
               "have active notifications (the small circle with a number in it) will be sorted on "
-              "top. Rooms that you have muted will still be sorted by timestamp, since you don't "
+              "top. Rooms that you have muted will still be sorted by the preferred sorting order, "
+              "since you don't "
               "seem to consider them as important as the other rooms.");
+        case SortByAlphabet:
+            return tr(
+              "Sort rooms alphabetically.\nIf this is off, the list of rooms will be sorted by the "
+              "timestamp of the last message in a room.\nIf this is on, rooms that come first "
+              "alphabetically "
+              "will be sorted earlier than ones that come later.");
         case ButtonsInTimeline:
             return tr(
               "Show buttons to quickly reply, react or access additional options next to each "
@@ -1408,6 +1456,12 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
                       "This can have useful applications, but it also could be used for nefarious "
                       "purposes. Enable at your own risk.\n\n"
                       "This setting will take effect upon restart.");
+        case UpdateSpaceVias:
+            return tr(
+              "To allow new users to join a community, the community needs to expose some "
+              "information about what servers participate in a room to community members. Since "
+              "the room participants can change over time, this needs to be updated from time to "
+              "time. This setting enables a background job to do that automatically.");
         }
     } else if (role == Type) {
         switch (index.row()) {
@@ -1439,6 +1493,7 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
         case AnimateImagesOnHover:
         case TypingNotifications:
         case SortByImportance:
+        case SortByAlphabet:
         case ButtonsInTimeline:
         case ReadReceipts:
         case DesktopNotifications:
@@ -1456,6 +1511,7 @@ UserSettingsModel::data(const QModelIndex &index, int role) const
         case ShareKeysWithTrustedUsers:
         case UseOnlineKeyBackup:
         case ExposeDBusApi:
+        case UpdateSpaceVias:
         case SpaceNotifications:
         case FancyEffects:
         case ReducedMotion:
@@ -1711,6 +1767,13 @@ UserSettingsModel::setData(const QModelIndex &index, const QVariant &value, int 
             } else
                 return false;
         }
+        case SortByAlphabet: {
+            if (value.userType() == QMetaType::Bool) {
+                i->setSortByAlphabet(value.toBool());
+                return true;
+            } else
+                return false;
+        }
         case ButtonsInTimeline: {
             if (value.userType() == QMetaType::Bool) {
                 i->setButtonsInTimeline(value.toBool());
@@ -1941,6 +2004,13 @@ UserSettingsModel::setData(const QModelIndex &index, const QVariant &value, int 
             } else
                 return false;
         }
+        case UpdateSpaceVias: {
+            if (value.userType() == QMetaType::Bool) {
+                i->setUpdateSpaceVias(value.toBool());
+                return true;
+            } else
+                return false;
+        }
         }
     }
     return false;
@@ -2121,8 +2191,11 @@ UserSettingsModel::UserSettingsModel(QObject *p)
     connect(s.get(), &UserSettings::scrollbarsInRoomlistChanged, this, [this]() {
         emit dataChanged(index(ScrollbarsInRoomlist), index(ScrollbarsInRoomlist), {Value});
     });
-    connect(s.get(), &UserSettings::roomSortingChanged, this, [this]() {
+    connect(s.get(), &UserSettings::roomSortingChangedImportance, this, [this]() {
         emit dataChanged(index(SortByImportance), index(SortByImportance), {Value});
+    });
+    connect(s.get(), &UserSettings::roomSortingChangedAlphabetical, this, [this]() {
+        emit dataChanged(index(SortByAlphabet), index(SortByAlphabet), {Value});
     });
     connect(s.get(), &UserSettings::decryptSidebarChanged, this, [this]() {
         emit dataChanged(index(DecryptSidebar), index(DecryptSidebar), {Value});
@@ -2189,5 +2262,8 @@ UserSettingsModel::UserSettingsModel(QObject *p)
     });
     connect(s.get(), &UserSettings::exposeDBusApiChanged, this, [this] {
         emit dataChanged(index(ExposeDBusApi), index(ExposeDBusApi), {Value});
+    });
+    connect(s.get(), &UserSettings::updateSpaceViasChanged, this, [this] {
+        emit dataChanged(index(UpdateSpaceVias), index(UpdateSpaceVias), {Value});
     });
 }

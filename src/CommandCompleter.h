@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -48,6 +46,8 @@ public:
         RainbowNotice,
         Confetti,
         RainbowConfetti,
+        Rainfall,
+        Msgtype,
         Goto,
         ConvertToDm,
         ConvertToRoom,

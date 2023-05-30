@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,9 +39,6 @@ struct RelatedInfo
 };
 
 namespace utils {
-
-using TimelineEvent = mtx::events::collections::TimelineEvents;
-
 //! Helper function to remove reply fallback from body
 std::string
 stripReplyFromBody(const std::string &body);
@@ -53,7 +48,9 @@ std::string
 stripReplyFromFormattedBody(const std::string &formatted_body);
 
 RelatedInfo
-stripReplyFallbacks(const TimelineEvent &event, std::string id, QString room_id_);
+stripReplyFallbacks(const mtx::events::collections::TimelineEvents &event,
+                    std::string id,
+                    QString room_id_);
 
 bool
 codepointIsEmoji(uint code);
@@ -77,7 +74,7 @@ descriptiveTime(const QDateTime &then);
 //! Generate a message description from the event to be displayed
 //! in the RoomList.
 DescInfo
-getMessageDescription(const TimelineEvent &event,
+getMessageDescription(const mtx::events::collections::TimelineEvents &event,
                       const QString &localUser,
                       const QString &displayName);
 
@@ -97,20 +94,21 @@ messageDescription(const QString &username = QString(),
                    const QString &body     = QString(),
                    const bool isLocal      = false)
 {
-    using Audio      = mtx::events::RoomEvent<mtx::events::msg::Audio>;
-    using Emote      = mtx::events::RoomEvent<mtx::events::msg::Emote>;
-    using File       = mtx::events::RoomEvent<mtx::events::msg::File>;
-    using Image      = mtx::events::RoomEvent<mtx::events::msg::Image>;
-    using Notice     = mtx::events::RoomEvent<mtx::events::msg::Notice>;
-    using Sticker    = mtx::events::Sticker;
-    using Text       = mtx::events::RoomEvent<mtx::events::msg::Text>;
-    using Video      = mtx::events::RoomEvent<mtx::events::msg::Video>;
-    using Confetti   = mtx::events::RoomEvent<mtx::events::msg::Confetti>;
-    using CallInvite = mtx::events::RoomEvent<mtx::events::voip::CallInvite>;
-    using CallAnswer = mtx::events::RoomEvent<mtx::events::voip::CallAnswer>;
-    using CallHangUp = mtx::events::RoomEvent<mtx::events::voip::CallHangUp>;
-    using CallReject = mtx::events::RoomEvent<mtx::events::voip::CallReject>;
-    using Encrypted  = mtx::events::EncryptedEvent<mtx::events::msg::Encrypted>;
+    using Audio         = mtx::events::RoomEvent<mtx::events::msg::Audio>;
+    using Emote         = mtx::events::RoomEvent<mtx::events::msg::Emote>;
+    using File          = mtx::events::RoomEvent<mtx::events::msg::File>;
+    using Image         = mtx::events::RoomEvent<mtx::events::msg::Image>;
+    using Notice        = mtx::events::RoomEvent<mtx::events::msg::Notice>;
+    using Sticker       = mtx::events::Sticker;
+    using Text          = mtx::events::RoomEvent<mtx::events::msg::Text>;
+    using Unknown       = mtx::events::RoomEvent<mtx::events::msg::Unknown>;
+    using Video         = mtx::events::RoomEvent<mtx::events::msg::Video>;
+    using ElementEffect = mtx::events::RoomEvent<mtx::events::msg::ElementEffect>;
+    using CallInvite    = mtx::events::RoomEvent<mtx::events::voip::CallInvite>;
+    using CallAnswer    = mtx::events::RoomEvent<mtx::events::voip::CallAnswer>;
+    using CallHangUp    = mtx::events::RoomEvent<mtx::events::voip::CallHangUp>;
+    using CallReject    = mtx::events::RoomEvent<mtx::events::voip::CallReject>;
+    using Encrypted     = mtx::events::EncryptedEvent<mtx::events::msg::Encrypted>;
 
     if (std::is_same<T, Audio>::value) {
         if (isLocal)
@@ -151,20 +149,21 @@ messageDescription(const QString &username = QString(),
             return QCoreApplication::translate("message-description sent:",
                                                "%1 sent a notification")
               .arg(username);
-    } else if (std::is_same<T, Text>::value) {
+    } else if (std::is_same<T, Text>::value || std::is_same<T, Unknown>::value) {
         if (isLocal)
             return QCoreApplication::translate("message-description sent:", "You: %1").arg(body);
         else
             return QCoreApplication::translate("message-description sent:", "%1: %2")
               .arg(username, body);
-    } else if (std::is_same<T, Confetti>::value) {
+    } else if (std::is_same<T, ElementEffect>::value) {
         if (body.isEmpty()) {
+            // TODO: what is the best way to handle this?
             if (isLocal)
                 return QCoreApplication::translate("message-description sent:",
-                                                   "You sent some confetti");
+                                                   "You sent a chat effect");
             else
                 return QCoreApplication::translate("message-description sent:",
-                                                   "%1 sent some confetti")
+                                                   "%1 sent a chat effect")
                   .arg(username);
         } else {
             if (isLocal)
@@ -337,4 +336,7 @@ markRoomAsDirect(QString roomid, std::vector<RoomMember> members);
 
 std::vector<std::string>
 roomVias(const std::string &roomid);
+
+void
+updateSpaceVias();
 }

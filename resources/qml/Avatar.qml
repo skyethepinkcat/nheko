@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -62,7 +60,13 @@ AbstractButton {
         smooth: true
         sourceSize.width: avatar.width * Screen.devicePixelRatio
         sourceSize.height: avatar.height * Screen.devicePixelRatio
-        source: avatar.url ? (avatar.url + "?radius=" + (Settings.avatarCircles ? 100 : 25) + ((avatar.crop) ? "" : "&scale")) : ""
+        source: if (avatar.url.startsWith('image://')) {
+            return avatar.url + "?radius=" + (Settings.avatarCircles ? 100 : 25) + ((avatar.crop) ? "" : "&scale");
+        } else if (avatar.url.startsWith(':/')) {
+            return "image://colorimage/" + avatar.url + "?" + textColor;
+        } else {
+            return "";
+        }
 
     }
 

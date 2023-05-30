@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -60,6 +58,12 @@ UserProfile::UserProfile(const QString &roomid,
           emit verificationStatiChanged();
       });
     fetchDeviceList(this->userid_);
+
+    if (userid != utils::localUser())
+        sharedRooms_ =
+          new RoomInfoModel(cache::client()->getCommonRooms(userid.toStdString()), this);
+    else
+        sharedRooms_ = new RoomInfoModel({}, this);
 }
 
 QHash<int, QByteArray>
@@ -104,10 +108,51 @@ DeviceInfoModel::reset(const std::vector<DeviceInfo> &deviceList)
     endResetModel();
 }
 
+RoomInfoModel::RoomInfoModel(const std::map<std::string, RoomInfo> &raw, QObject *parent)
+  : QAbstractListModel(parent)
+{
+    for (const auto &e : raw)
+        roomInfos_.push_back(e);
+}
+
+QHash<int, QByteArray>
+RoomInfoModel::roleNames() const
+{
+    return {
+      {RoomId, "roomId"},
+      {RoomName, "roomName"},
+      {AvatarUrl, "avatarUrl"},
+    };
+}
+
+QVariant
+RoomInfoModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid() || index.row() >= (int)roomInfos_.size() || index.row() < 0)
+        return {};
+
+    switch (role) {
+    case RoomId:
+        return QString::fromStdString(roomInfos_[index.row()].first);
+    case RoomName:
+        return QString::fromStdString(roomInfos_[index.row()].second.name);
+    case AvatarUrl:
+        return QString::fromStdString(roomInfos_[index.row()].second.avatar_url);
+    default:
+        return {};
+    }
+}
+
 DeviceInfoModel *
 UserProfile::deviceList()
 {
     return &this->deviceList_;
+}
+
+RoomInfoModel *
+UserProfile::sharedRooms()
+{
+    return this->sharedRooms_;
 }
 
 QString

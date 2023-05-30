@@ -1,16 +1,16 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import ".."
 import "../device-verification"
 import "../ui"
+import "../components"
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.2
 import QtQuick.Window 2.13
+import QtQml.Models 2.2
 import im.nheko 1.0
 
 ApplicationWindow {
@@ -36,12 +36,13 @@ ApplicationWindow {
     ListView {
         id: devicelist
 
+        property int selectedTab: 0
+
         Layout.fillHeight: true
         Layout.fillWidth: true
         clip: true
         spacing: 8
         boundsBehavior: Flickable.StopAtBounds
-        model: profile.deviceList
         anchors.fill: parent
         anchors.margins: 10
         footerPositioning: ListView.OverlayFooter
@@ -56,7 +57,7 @@ ApplicationWindow {
             id: contentL
 
             width: devicelist.width
-            spacing: 10
+            spacing: Nheko.paddingMedium
 
             Avatar {
                 id: displayAvatar
@@ -177,6 +178,25 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignHCenter
             }
 
+            MatrixText {
+                id: statusMsg
+                text: qsTr("<i><b>Status:</b> %1</i>").arg(userStatus)
+                visible: userStatus != ""
+                Layout.fillWidth: true
+                horizontalAlignment: TextEdit.AlignHCenter
+                Layout.leftMargin: Nheko.paddingMedium
+                Layout.rightMargin: Nheko.paddingMedium
+                font.pointSize: Math.floor(fontMetrics.font.pointSize * 0.9)
+
+                property string userStatus: Presence.userStatus(profile.userid)
+                Connections {
+                    target: Presence
+                    function onPresenceChanged(id) {
+                        if (id == profile.userid) statusMsg.userStatus = Presence.userStatus(profile.userid);
+                    }
+                }
+            }
+
             RowLayout {
                 visible: !profile.isGlobalUserProfile
                 Layout.alignment: Qt.AlignHCenter
@@ -218,8 +238,8 @@ ApplicationWindow {
             }
 
             EncryptionIndicator {
-                Layout.preferredHeight: 16
-                Layout.preferredWidth: 16
+                Layout.preferredHeight: 32
+                Layout.preferredWidth: 32
                 encrypted: profile.userVerificationEnabled
                 trust: profile.userVerified
                 Layout.alignment: Qt.AlignHCenter
@@ -245,6 +265,8 @@ ApplicationWindow {
                 spacing: Nheko.paddingSmall
 
                 ImageButton {
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 24
                     image: ":/icons/icons/ui/chat.svg"
                     hoverEnabled: true
                     ToolTip.visible: hovered
@@ -253,6 +275,8 @@ ApplicationWindow {
                 }
 
                 ImageButton {
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 24
                     image: ":/icons/icons/ui/round-remove-button.svg"
                     hoverEnabled: true
                     ToolTip.visible: hovered
@@ -262,6 +286,8 @@ ApplicationWindow {
                 }
 
                 ImageButton {
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 24
                     image: ":/icons/icons/ui/ban.svg"
                     hoverEnabled: true
                     ToolTip.visible: hovered
@@ -271,6 +297,8 @@ ApplicationWindow {
                 }
 
                 ImageButton {
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 24
                     image: ":/icons/icons/ui/refresh.svg"
                     hoverEnabled: true
                     ToolTip.visible: hovered
@@ -280,145 +308,214 @@ ApplicationWindow {
 
             }
 
+            TabBar {
+                id: tabbar
+                visible: !profile.isSelf
+                Layout.fillWidth: true
+
+                onCurrentIndexChanged: devicelist.selectedTab = currentIndex
+
+                palette: Nheko.colors
+
+                NhekoTabButton {
+                    text: qsTr("Devices")
+                }
+                NhekoTabButton {
+                    text: qsTr("Shared Rooms")
+                }
+
+                Layout.bottomMargin: Nheko.paddingMedium
+            }
         }
 
-        delegate: RowLayout {
-            required property int verificationStatus
-            required property string deviceId
-            required property string deviceName
-            required property string lastIp
-            required property var lastTs
+        model: (selectedTab == 0) ? devicesModel : sharedRoomsModel
 
-            width: devicelist.width
-            spacing: 4
+        DelegateModel {
+            id: devicesModel
+            model: profile.deviceList
+            delegate: RowLayout {
+                required property int verificationStatus
+                required property string deviceId
+                required property string deviceName
+                required property string lastIp
+                required property var lastTs
 
-            ColumnLayout {
-                spacing: 0
+                width: devicelist.width
+                spacing: 4
 
-                RowLayout {
+                ColumnLayout {
+                    spacing: 0
+
+                    Layout.leftMargin: Nheko.paddingMedium
+                    Layout.rightMargin: Nheko.paddingMedium
+                    RowLayout {
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignLeft
+                            elide: Text.ElideRight
+                            font.bold: true
+                            color: Nheko.colors.text
+                            text: deviceId
+                        }
+
+                        Image {
+                            Layout.preferredHeight: 16
+                            Layout.preferredWidth: 16
+                            visible: profile.isSelf && verificationStatus != VerificationStatus.NOT_APPLICABLE
+                            sourceSize.height: 16 * Screen.devicePixelRatio
+                            sourceSize.width: 16 * Screen.devicePixelRatio
+                            source: {
+                                switch (verificationStatus) {
+                                    case VerificationStatus.VERIFIED:
+                                    return "image://colorimage/:/icons/icons/ui/shield-filled-checkmark.svg?" + Nheko.theme.green;
+                                    case VerificationStatus.UNVERIFIED:
+                                    return "image://colorimage/:/icons/icons/ui/shield-filled-exclamation-mark.svg?" + Nheko.theme.orange;
+                                    case VerificationStatus.SELF:
+                                    return "image://colorimage/:/icons/icons/ui/checkmark.svg?" + Nheko.theme.green;
+                                    default:
+                                    return "image://colorimage/:/icons/icons/ui/shield-filled-cross.svg?" + Nheko.theme.orange;
+                                }
+                            }
+                        }
+
+                        ImageButton {
+                            Layout.alignment: Qt.AlignTop
+                            image: ":/icons/icons/ui/power-off.svg"
+                            hoverEnabled: true
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Sign out this device.")
+                            onClicked: profile.signOutDevice(deviceId)
+                            visible: profile.isSelf
+                        }
+
+                    }
+
+                    RowLayout {
+                        id: deviceNameRow
+
+                        property bool isEditingAllowed
+
+                        TextInput {
+                            id: deviceNameField
+
+                            readOnly: !deviceNameRow.isEditingAllowed
+                            text: deviceName
+                            color: Nheko.colors.text
+                            Layout.alignment: Qt.AlignLeft
+                            Layout.fillWidth: true
+                            selectByMouse: true
+                            onAccepted: {
+                                profile.changeDeviceName(deviceId, deviceNameField.text);
+                                deviceNameRow.isEditingAllowed = false;
+                            }
+                        }
+
+                        ImageButton {
+                            visible: profile.isSelf
+                            hoverEnabled: true
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Change device name.")
+                            image: deviceNameRow.isEditingAllowed ? ":/icons/icons/ui/checkmark.svg" : ":/icons/icons/ui/edit.svg"
+                            onClicked: {
+                                if (deviceNameRow.isEditingAllowed) {
+                                    profile.changeDeviceName(deviceId, deviceNameField.text);
+                                    deviceNameRow.isEditingAllowed = false;
+                                } else {
+                                    deviceNameRow.isEditingAllowed = true;
+                                    deviceNameField.focus = true;
+                                    deviceNameField.selectAll();
+                                }
+                            }
+                        }
+
+                    }
+
                     Text {
+                        visible: profile.isSelf
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignLeft
                         elide: Text.ElideRight
-                        font.bold: true
                         color: Nheko.colors.text
-                        text: deviceId
+                        text: qsTr("Last seen %1 from %2").arg(new Date(lastTs).toLocaleString(Locale.ShortFormat)).arg(lastIp ? lastIp : "???")
                     }
 
-                    Image {
-                        Layout.preferredHeight: 16
-                        Layout.preferredWidth: 16
-                        visible: profile.isSelf && verificationStatus != VerificationStatus.NOT_APPLICABLE
-                        sourceSize.height: 16 * Screen.devicePixelRatio
-                        sourceSize.width: 16 * Screen.devicePixelRatio
-                        source: {
-                            switch (verificationStatus) {
+                }
+
+                Image {
+                    Layout.preferredHeight: 16
+                    Layout.preferredWidth: 16
+                    visible: !profile.isSelf && verificationStatus != VerificationStatus.NOT_APPLICABLE
+                    source: {
+                        switch (verificationStatus) {
                             case VerificationStatus.VERIFIED:
-                                return "image://colorimage/:/icons/icons/ui/shield-filled-checkmark.svg?" + Nheko.theme.green;
+                            return "image://colorimage/:/icons/icons/ui/shield-filled-checkmark.svg?" + Nheko.theme.green;
                             case VerificationStatus.UNVERIFIED:
-                                return "image://colorimage/:/icons/icons/ui/shield-filled-exclamation-mark.svg?" + Nheko.theme.orange;
+                            return "image://colorimage/:/icons/icons/ui/shield-filled-exclamation-mark.svg?" + Nheko.theme.orange;
                             case VerificationStatus.SELF:
-                                return "image://colorimage/:/icons/icons/ui/checkmark.svg?" + Nheko.theme.green;
+                            return "image://colorimage/:/icons/icons/ui/checkmark.svg?" + Nheko.theme.green;
                             default:
-                                return "image://colorimage/:/icons/icons/ui/shield-filled-cross.svg?" + Nheko.theme.orange;
-                            }
+                            return "image://colorimage/:/icons/icons/ui/shield-filled.svg?" + Nheko.theme.red;
                         }
                     }
-
-                    ImageButton {
-                        Layout.alignment: Qt.AlignTop
-                        image: ":/icons/icons/ui/power-off.svg"
-                        hoverEnabled: true
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Sign out this device.")
-                        onClicked: profile.signOutDevice(deviceId)
-                        visible: profile.isSelf
-                    }
-
                 }
 
-                RowLayout {
-                    id: deviceNameRow
+                Button {
+                    id: verifyButton
 
-                    property bool isEditingAllowed
-
-                    TextInput {
-                        id: deviceNameField
-
-                        readOnly: !deviceNameRow.isEditingAllowed
-                        text: deviceName
-                        color: Nheko.colors.text
-                        Layout.alignment: Qt.AlignLeft
-                        Layout.fillWidth: true
-                        selectByMouse: true
-                        onAccepted: {
-                            profile.changeDeviceName(deviceId, deviceNameField.text);
-                            deviceNameRow.isEditingAllowed = false;
-                        }
-                    }
-
-                    ImageButton {
-                        visible: profile.isSelf
-                        hoverEnabled: true
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Change device name.")
-                        image: deviceNameRow.isEditingAllowed ? ":/icons/icons/ui/checkmark.svg" : ":/icons/icons/ui/edit.svg"
-                        onClicked: {
-                            if (deviceNameRow.isEditingAllowed) {
-                                profile.changeDeviceName(deviceId, deviceNameField.text);
-                                deviceNameRow.isEditingAllowed = false;
-                            } else {
-                                deviceNameRow.isEditingAllowed = true;
-                                deviceNameField.focus = true;
-                                deviceNameField.selectAll();
-                            }
-                        }
-                    }
-
-                }
-
-                Text {
-                    visible: profile.isSelf
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignLeft
-                    elide: Text.ElideRight
-                    color: Nheko.colors.text
-                    text: qsTr("Last seen %1 from %2").arg(new Date(lastTs).toLocaleString(Locale.ShortFormat)).arg(lastIp ? lastIp : "???")
-                }
-
-            }
-
-            Image {
-                Layout.preferredHeight: 16
-                Layout.preferredWidth: 16
-                visible: !profile.isSelf && verificationStatus != VerificationStatus.NOT_APPLICABLE
-                source: {
-                    switch (verificationStatus) {
-                    case VerificationStatus.VERIFIED:
-                        return "image://colorimage/:/icons/icons/ui/shield-filled-checkmark.svg?" + Nheko.theme.green;
-                    case VerificationStatus.UNVERIFIED:
-                        return "image://colorimage/:/icons/icons/ui/shield-filled-exclamation-mark.svg?" + Nheko.theme.orange;
-                    case VerificationStatus.SELF:
-                        return "image://colorimage/:/icons/icons/ui/checkmark.svg?" + Nheko.theme.green;
-                    default:
-                        return "image://colorimage/:/icons/icons/ui/shield-filled.svg?" + Nheko.theme.red;
-                    }
-                }
-            }
-
-            Button {
-                id: verifyButton
-
-                visible: verificationStatus == VerificationStatus.UNVERIFIED && (profile.isSelf || !profile.userVerificationEnabled)
-                text: (verificationStatus != VerificationStatus.VERIFIED) ? qsTr("Verify") : qsTr("Unverify")
-                onClicked: {
-                    if (verificationStatus == VerificationStatus.VERIFIED)
+                    visible: verificationStatus == VerificationStatus.UNVERIFIED && (profile.isSelf || !profile.userVerificationEnabled)
+                    text: (verificationStatus != VerificationStatus.VERIFIED) ? qsTr("Verify") : qsTr("Unverify")
+                    onClicked: {
+                        if (verificationStatus == VerificationStatus.VERIFIED)
                         profile.unverify(deviceId);
-                    else
+                        else
                         profile.verify(deviceId);
+                    }
+                }
+
+            }
+        }
+
+        DelegateModel {
+            id: sharedRoomsModel
+            model: profile.sharedRooms
+            delegate: RowLayout {
+                required property string roomId
+                required property string roomName
+                required property string avatarUrl
+
+                width: devicelist.width
+                spacing: 4
+
+
+                Avatar {
+                    id: avatar
+
+                    enabled: false
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.leftMargin: Nheko.paddingMedium
+
+                    property int avatarSize: Math.ceil(fontMetrics.lineSpacing * 1.6)
+                    height: avatarSize
+                    width: avatarSize
+                    url: avatarUrl.replace("mxc://", "image://MxcImage/")
+                    roomid: roomId
+                    displayName: roomName
+                }
+
+                ElidedLabel {
+                    Layout.alignment: Qt.AlignVCenter
+                    color: Nheko.colors.text
+                    Layout.fillWidth: true
+                    elideWidth: width
+                    fullText: roomName
+                    textFormat: Text.PlainText
+                    Layout.rightMargin: Nheko.paddingMedium
+                }
+
+                Item {
+                    Layout.fillWidth: true
                 }
             }
-
         }
 
         footer: DialogButtonBox {

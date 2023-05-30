@@ -21,6 +21,7 @@ set(
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard")
 set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard to be supported")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "compile as PIC by default")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "macos deployment target")
 
 option(HUNTER_ENABLED "Enable Hunter package manager" OFF)
 include("cmake/HunterGate.cmake")
@@ -72,6 +73,7 @@ if (APPLE OR WIN32)
 endif()
 option(VOIP "Whether to enable voip support. Disable this, if you don't have gstreamer." ${VOIP_DEFAULT})
 cmake_dependent_option(SCREENSHARE_X11 "Whether to enable screenshare support on X11." ON "VOIP" OFF)
+cmake_dependent_option(SCREENSHARE_XDP "Whether to enable screenshare support using xdg-desktop-portal." ON "VOIP" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -354,8 +356,6 @@ set(SRC_FILES
 	src/dialogs/ReCaptcha.h
 
 	# Emoji
-	src/emoji/EmojiModel.cpp
-	src/emoji/EmojiModel.h
 	src/emoji/Provider.cpp
 	src/emoji/Provider.h
 
@@ -413,6 +413,9 @@ set(SRC_FILES
 	src/voip/CallDevices.h
 	src/voip/CallManager.cpp
 	src/voip/CallManager.h
+	src/voip/ScreenCastPortal.cpp
+	src/voip/ScreenCastPortal.h
+	src/voip/WebRTCSession.h
 	src/voip/WebRTCSession.cpp
 	src/voip/WebRTCSession.h
 
@@ -451,6 +454,8 @@ set(SRC_FILES
 	src/ColorImageProvider.h
 	src/CombinedImagePackModel.cpp
 	src/CombinedImagePackModel.h
+	src/GridImagePackModel.cpp
+	src/GridImagePackModel.h
 	src/CommandCompleter.cpp
 	src/CommandCompleter.h
 	src/CompletionModelRoles.h
@@ -597,7 +602,7 @@ if(USE_BUNDLED_MTXCLIENT)
 	FetchContent_Declare(
 		MatrixClient
                 GIT_REPOSITORY https://github.com/Nheko-Reborn/mtxclient.git
-                GIT_TAG        v0.9.2
+                GIT_TAG        e136bc27b28d3bb5683735eb5a65d6ef2534ca3a
 		)
 	set(BUILD_LIB_EXAMPLES OFF CACHE INTERNAL "")
 	set(BUILD_LIB_TESTS OFF CACHE INTERNAL "")

@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -47,7 +44,9 @@ class UserSettings final : public QObject
     Q_PROPERTY(bool typingNotifications READ typingNotifications WRITE setTypingNotifications NOTIFY
                  typingNotificationsChanged)
     Q_PROPERTY(bool sortByImportance READ sortByImportance WRITE setSortByImportance NOTIFY
-                 roomSortingChanged)
+                 roomSortingChangedImportance)
+    Q_PROPERTY(bool sortByAlphabet READ sortByAlphabet WRITE setSortByAlphabet NOTIFY
+                 roomSortingChangedAlphabetical)
     Q_PROPERTY(bool buttonsInTimeline READ buttonsInTimeline WRITE setButtonsInTimeline NOTIFY
                  buttonInTimelineChanged)
     Q_PROPERTY(bool readReceipts READ readReceipts WRITE setReadReceipts NOTIFY readReceiptsChanged)
@@ -124,6 +123,8 @@ class UserSettings final : public QObject
                  hiddenWidgetsChanged)
     Q_PROPERTY(
       bool exposeDBusApi READ exposeDBusApi WRITE setExposeDBusApi NOTIFY exposeDBusApiChanged)
+    Q_PROPERTY(bool updateSpaceVias READ updateSpaceVias WRITE setUpdateSpaceVias NOTIFY
+                 updateSpaceViasChanged)
 
     UserSettings();
 
@@ -164,6 +165,7 @@ public:
     void setReadReceipts(bool state);
     void setTypingNotifications(bool state);
     void setSortByImportance(bool state);
+    void setSortByAlphabet(bool state);
     void setButtonsInTimeline(bool state);
     void setTimelineMaxWidth(int state);
     void setCommunityListWidth(int state);
@@ -196,6 +198,7 @@ public:
     void setUserId(QString userId);
     void setAccessToken(QString accessToken);
     void setDeviceId(QString deviceId);
+    void setCurrentTagId(QString currentTagId);
     void setHomeserver(QString homeserver);
     void setDisableCertificateValidation(bool disabled);
     void setHiddenTags(const QStringList &hiddenTags);
@@ -208,6 +211,7 @@ public:
     void setOpenVideoExternal(bool state);
     void setCollapsedSpaces(QList<QStringList> spaces);
     void setExposeDBusApi(bool state);
+    void setUpdateSpaceVias(bool state);
 
     QString theme() const { return !theme_.isEmpty() ? theme_ : defaultTheme_; }
     bool messageHoverHighlight() const { return messageHoverHighlight_; }
@@ -231,6 +235,7 @@ public:
     bool animateImagesOnHover() const { return animateImagesOnHover_; }
     bool typingNotifications() const { return typingNotifications_; }
     bool sortByImportance() const { return sortByImportance_; }
+    bool sortByAlphabet() const { return sortByAlphabet_; }
     bool buttonsInTimeline() const { return buttonsInTimeline_; }
     bool mobileMode() const { return mobileMode_; }
     bool readReceipts() const { return readReceipts_; }
@@ -268,6 +273,7 @@ public:
     QString userId() const { return userId_; }
     QString accessToken() const { return accessToken_; }
     QString deviceId() const { return deviceId_; }
+    QString currentTagId() const { return currentTagId_; }
     QString homeserver() const { return homeserver_; }
     bool disableCertificateValidation() const { return disableCertificateValidation_; }
     QStringList hiddenTags() const { return hiddenTags_; }
@@ -280,11 +286,13 @@ public:
     bool openVideoExternal() const { return openVideoExternal_; }
     QList<QStringList> collapsedSpaces() const { return collapsedSpaces_; }
     bool exposeDBusApi() const { return exposeDBusApi_; }
+    bool updateSpaceVias() const { return updateSpaceVias_; }
 
 signals:
     void groupViewStateChanged(bool state);
     void scrollbarsInRoomlistChanged(bool state);
-    void roomSortingChanged(bool state);
+    void roomSortingChangedImportance(bool state);
+    void roomSortingChangedAlphabetical(bool state);
     void themeChanged(QString state);
     void messageHoverHighlightChanged(bool state);
     void enlargeEmojiOnlyMessagesChanged(bool state);
@@ -342,6 +350,7 @@ signals:
     void hiddenWidgetsChanged();
     void recentReactionsChanged();
     void exposeDBusApiChanged(bool state);
+    void updateSpaceViasChanged(bool state);
 
 private:
     // Default to system theme if QT_QPA_PLATFORMTHEME var is set.
@@ -364,6 +373,7 @@ private:
     bool animateImagesOnHover_;
     bool typingNotifications_;
     bool sortByImportance_;
+    bool sortByAlphabet_;
     bool buttonsInTimeline_;
     bool readReceipts_;
     bool hasDesktopNotifications_;
@@ -402,6 +412,7 @@ private:
     QString userId_;
     QString accessToken_;
     QString deviceId_;
+    QString currentTagId_;
     QString homeserver_;
     QStringList hiddenTags_;
     QStringList mutedTags_;
@@ -413,6 +424,7 @@ private:
     bool openImageExternal_;
     bool openVideoExternal_;
     bool exposeDBusApi_;
+    bool updateSpaceVias_;
 
     QSettings settings;
 
@@ -442,6 +454,7 @@ class UserSettingsModel final : public QAbstractListModel
 #ifdef NHEKO_DBUS_SYS
         ExposeDBusApi,
 #endif
+        UpdateSpaceVias,
 
         AccessibilitySection,
         ReducedMotion,
@@ -465,6 +478,7 @@ class UserSettingsModel final : public QAbstractListModel
         SidebarSection,
         GroupView,
         SortByImportance,
+        SortByAlphabet,
         DecryptSidebar,
         SpaceNotifications,
 

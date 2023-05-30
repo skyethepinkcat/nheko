@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -28,6 +27,17 @@ Window {
     Shortcut {
         sequence: StandardKey.Cancel
         onActivated: imageOverlay.close()
+    }
+
+    Shortcut {
+        sequence: StandardKey.Copy
+        onActivated: {
+            if (room) {
+                room.copyMedia(eventId);
+            } else {
+                TimelineManager.copyImage(url);
+            }
+        }
     }
 
     TapHandler {
@@ -112,10 +122,33 @@ Window {
             height: 48
             width: 48
             hoverEnabled: true
+            image: ":/icons/icons/ui/copy.svg"
+
+            //ToolTip.visible: hovered
+            //ToolTip.delay: Nheko.tooltipDelay
+            //ToolTip.text: qsTr("Copy to clipboard")
+
+            onClicked: {
+                imageOverlay.hide();
+                if (room) {
+                    room.copyMedia(eventId);
+                } else {
+                    TimelineManager.copyImage(url);
+                }
+                imageOverlay.close();
+            }
+        }
+
+        ImageButton {
+            height: 48
+            width: 48
+            hoverEnabled: true
             image: ":/icons/icons/ui/download.svg"
+
             //ToolTip.visible: hovered
             //ToolTip.delay: Nheko.tooltipDelay
             //ToolTip.text: qsTr("Download")
+
             onClicked: {
                 imageOverlay.hide();
                 if (room) {
@@ -131,9 +164,11 @@ Window {
             width: 48
             hoverEnabled: true
             image: ":/icons/icons/ui/dismiss.svg"
+
             //ToolTip.visible: hovered
             //ToolTip.delay: Nheko.tooltipDelay
             //ToolTip.text: qsTr("Close")
+            
             onClicked: imageOverlay.close()
         }
     }

@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -55,7 +53,7 @@ public slots:
 #if defined(NHEKO_DBUS_SYS)
 public:
     void closeNotifications(QString roomId);
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
     void closeAllNotifications();
 #endif
 
@@ -77,16 +75,17 @@ private:
 private:
     // Objective-C(++) doesn't like to do lots of regular C++, so the actual notification
     // posting is split out
-    void objCxxPostNotification(const QString &room_name,
-                                const QString &room_id,
-                                const QString &event_id,
-                                const QString &subtitle,
-                                const QString &informativeText,
-                                const QString &bodyImagePath,
-                                const QString &respondStr,
-                                const QString &sendStr,
-                                const QString &placeholder,
+    void objCxxPostNotification(const QString room_name,
+                                const QString room_id,
+                                const QString event_id,
+                                const QString subtitle,
+                                const QString informativeText,
+                                const QString bodyImagePath,
                                 const bool playSound);
+
+    QString respondStr;
+    QString sendStr;
+    QString placeholder;
 
 public:
     static void attachToMacNotifCenter();

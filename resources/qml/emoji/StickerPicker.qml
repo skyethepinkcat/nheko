@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -19,13 +17,15 @@ Menu {
     property var colors
     property string roomid
     property alias model: gridView.model
+    required property bool emoji
     property var textArea
     property real highlightHue: Nheko.colors.highlight.hslHue
     property real highlightSat: Nheko.colors.highlight.hslSaturation
     property real highlightLight: Nheko.colors.highlight.hslLightness
-    readonly property int stickerDim: 128
-    readonly property int stickerDimPad: 128 + Nheko.paddingSmall
-    readonly property int stickersPerRow: 3
+    readonly property int stickerDim: emoji ? 48 : 128
+    readonly property int stickerDimPad: stickerDim + Nheko.paddingSmall
+    readonly property int stickersPerRow: emoji ? 7 : 3
+    readonly property int sidebarAvatarSize: 24
 
     function show(showAt, roomid_, callback) {
         console.debug("Showing sticker picker");
@@ -42,28 +42,31 @@ Menu {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    width: stickersPerRow * stickerDimPad + 20
+    width: sidebarAvatarSize + Nheko.paddingSmall + stickersPerRow * stickerDimPad + 20
 
     Rectangle {
         color: Nheko.colors.window
         height: columnView.implicitHeight + Nheko.paddingSmall*2
-        width: stickersPerRow * stickerDimPad + 20
+        width: sidebarAvatarSize + Nheko.paddingSmall + stickersPerRow * stickerDimPad + 20
 
-        ColumnLayout {
+        GridLayout {
             id: columnView
 
-            spacing: Nheko.paddingSmall
             anchors.leftMargin: Nheko.paddingSmall
             anchors.rightMargin: Nheko.paddingSmall
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
+            columns: 2
+            rows: 2
 
             // Search field
             TextField {
                 id: emojiSearch
 
                 Layout.preferredWidth: stickersPerRow * stickerDimPad + 20 - Nheko.paddingSmall
+                Layout.row: 0
+                Layout.column: 1
                 palette: Nheko.colors
                 background: null
                 placeholderTextColor: Nheko.colors.buttonText
@@ -104,19 +107,40 @@ Menu {
                 }
             }
 
-            // emoji grid
-            GridView {
+            // sticker grid
+            ListView {
                 id: gridView
 
-                model: roomid ? TimelineManager.completerFor("stickers", roomid) : null
-                Layout.preferredHeight: cellHeight * 3.5
+                model: roomid ? TimelineManager.completerFor(stickerPopup.emoji ? "emojigrid" : "stickergrid", roomid) : null
+                Layout.row: 1
+                Layout.column: 1
+                Layout.preferredHeight: cellHeight * (stickersPerRow + 0.5)
                 Layout.preferredWidth: stickersPerRow * stickerDimPad + 20 - Nheko.paddingSmall
-                cellWidth: stickerDimPad
-                cellHeight: stickerDimPad
+                property int cellHeight: stickerDimPad
                 boundsBehavior: Flickable.StopAtBounds
                 clip: true
                 currentIndex: -1 // prevent sorting from stealing focus
-                cacheBuffer: 500
+
+                section.property: "packname"
+                section.criteria: ViewSection.FullString
+                section.delegate: Rectangle {
+                    width: gridView.width
+                    height: childrenRect.height
+                    color: Nheko.colors.alternateBase
+
+                    required property string section
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        text: parent.section
+                        color: Nheko.colors.text
+                        font.bold: true
+                    }
+                }
+                section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
+
+                spacing: Nheko.paddingSmall
 
                 ScrollHelper {
                     flickable: parent
@@ -125,32 +149,77 @@ Menu {
                 }
 
                 // Individual emoji
-                delegate: AbstractButton {
-                    width: stickerDim
-                    height: stickerDim
-                    hoverEnabled: true
-                    ToolTip.text: ":" + model.shortcode + ": - " + model.body
-                    ToolTip.visible: hovered
-                    // TODO: maybe add favorites at some point?
-                    onClicked: {
-                        console.debug("Picked " + model.shortcode);
-                        stickerPopup.close();
-                        callback(model.originalRow);
-                    }
+                delegate: Row {
+                    required property var row;
 
-                    contentItem: Image {
-                        height: stickerDim
-                        width: stickerDim
-                        source: model.url.replace("mxc://", "image://MxcImage/") + "?scale"
-                        fillMode: Image.PreserveAspectFit
-                    }
+                    spacing: Nheko.paddingSmall
 
-                    background: Rectangle {
-                        anchors.fill: parent
-                        color: hovered ? Nheko.colors.highlight : 'transparent'
-                        radius: 5
-                    }
+                    Repeater {
+                        model: row
 
+                        delegate: AbstractButton {
+                            id: del
+
+                            required property var modelData
+
+                            width: stickerDim
+                            height: stickerDim
+                            hoverEnabled: true
+                            ToolTip.text: ":" + modelData.shortcode + ": - " + (modelData.unicode ? modelData.unicodeName : modelData.body)
+                            ToolTip.visible: hovered
+                            // TODO: maybe add favorites at some point?
+                            onClicked: {
+                                console.debug("Picked " + modelData);
+                                stickerPopup.close();
+                                if (!stickerPopup.emoji) {
+                                    // return descriptor to calculate sticker to send
+                                    callback(modelData.descriptor);
+                                } else if (modelData.unicode) {
+                                    // return the emoji unicode as both plain text and markdown
+                                    callback(modelData.unicode, modelData.unicode);
+                                } else {
+                                    // return the emoji url as plain text and a markdown link as markdown
+                                    callback(modelData.url, modelData.markdown);
+                                }
+                            }
+
+                            contentItem: DelegateChooser {
+                                roleValue: del.modelData.unicode != undefined
+
+                                DelegateChoice {
+                                    roleValue: true
+
+                                    Text {
+                                        width: stickerDim
+                                        height: stickerDim
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        font.family: Settings.emojiFont
+                                        font.pixelSize: 36
+                                        text: del.modelData.unicode.replace('\ufe0f', '')
+                                        color: Nheko.colors.text
+                                    }
+                                }
+
+                                DelegateChoice {
+                                    roleValue: false
+                                    Image {
+                                        height: stickerDim
+                                        width: stickerDim
+                                        source: del.modelData.url.replace("mxc://", "image://MxcImage/") + "?scale"
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+                                }
+                            }
+
+                            background: Rectangle {
+                                anchors.fill: parent
+                                color: hovered ? Nheko.colors.highlight : 'transparent'
+                                radius: 5
+                            }
+
+                        }
+                    }
                 }
 
                 ScrollBar.vertical: ScrollBar {
@@ -159,6 +228,47 @@ Menu {
 
             }
 
+            ListView {
+                Layout.row: 1
+                Layout.column: 0
+                Layout.preferredWidth: sidebarAvatarSize
+                Layout.fillHeight: true
+                Layout.rightMargin: Nheko.paddingSmall
+
+                model: gridView.model ? gridView.model.sections : null
+                spacing: Nheko.paddingSmall
+                clip: true
+
+                delegate: Avatar {
+                    height: sidebarAvatarSize
+                    width: sidebarAvatarSize
+                    url: modelData.url.replace("mxc://", "image://MxcImage/")
+                    displayName: modelData.name
+                    roomid: modelData.name
+
+                    hoverEnabled: true
+                    ToolTip.visible: hovered
+                    ToolTip.delay: Nheko.tooltipDelay
+                    ToolTip.text: modelData.name
+                    onClicked: gridView.positionViewAtIndex(modelData.firstRowWith, ListView.Beginning)
+                }
+            }
+
+            ImageButton {
+                Layout.row: 0
+                Layout.column: 0
+                Layout.preferredWidth: sidebarAvatarSize
+                Layout.preferredHeight: sidebarAvatarSize
+                Layout.rightMargin: Nheko.paddingSmall
+
+                image: ":/icons/icons/ui/settings.svg"
+
+                hoverEnabled: true
+                ToolTip.visible: hovered
+                ToolTip.delay: Nheko.tooltipDelay
+                ToolTip.text: qsTr("Change what packs are enabled, remove packs, or create new ones")
+                onClicked: TimelineManager.openImagePackSettings(stickerPopup.roomid)
+            }
         }
 
     }

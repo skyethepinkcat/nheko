@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -160,9 +157,15 @@ main(int argc, char *argv[])
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 
+    // Disable the qml disk cache by default to prevent crashes on updates. See
+    // https://github.com/Nheko-Reborn/nheko/issues/1383
+    if (qgetenv("NHEKO_ALLOW_QML_DISK_CACHE").size() == 0) {
+        qputenv("QML_DISABLE_DISK_CACHE", "1");
+    }
+
     // this needs to be after setting the application name. Or how would we find our settings
     // file then?
-#if defined(Q_OS_LINUX) || defined(Q_OS_WIN) || defined(Q_OS_FREEBSD)
+#if !defined(Q_OS_MACOS)
     if (qgetenv("QT_SCALE_FACTOR").size() == 0) {
         float factor = utils::scaleFactor();
 

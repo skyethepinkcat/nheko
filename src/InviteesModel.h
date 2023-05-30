@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,6 +7,8 @@
 
 #include <QAbstractListModel>
 #include <QVector>
+
+class TimelineModel;
 
 class Invitee final : public QObject
 {
@@ -36,6 +36,7 @@ class InviteesModel final : public QAbstractListModel
     Q_OBJECT
 
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
+    Q_PROPERTY(TimelineModel *room READ room CONSTANT)
 
 public:
     enum Roles
@@ -45,7 +46,9 @@ public:
         AvatarUrl,
     };
 
-    InviteesModel(QObject *parent = nullptr);
+    InviteesModel(TimelineModel *room, QObject *parent = nullptr);
+
+    TimelineModel *room() const { return room_; }
 
     Q_INVOKABLE void addUser(QString mxid, QString displayName = "", QString avatarUrl = "");
     Q_INVOKABLE void removeUser(QString mxid);
@@ -65,6 +68,7 @@ signals:
 
 private:
     QVector<Invitee *> invitees_;
+    TimelineModel *room_;
 };
 
 #endif // INVITEESMODEL_H

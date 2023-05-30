@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -55,7 +53,7 @@ threadFallbackEventId(const std::string &room_id, const std::string &thread_id)
     for (const auto &[index, event_id] : orderedEvents) {
         (void)index;
         if (auto event = cache::client()->getEvent(room_id, event_id)) {
-            if (mtx::accessors::relations(event->data).thread() == thread_id)
+            if (mtx::accessors::relations(event.value()).thread() == thread_id)
                 return std::string(event_id);
         }
     }
@@ -150,6 +148,7 @@ InputBar::insertMimeData(const QMimeData *md)
 
     nhlog::ui()->debug("Got mime formats: {}",
                        md->formats().join(QStringLiteral(", ")).toStdString());
+    nhlog::ui()->debug("Has image: {}", md->hasImage());
     const auto formats = md->formats().filter(QStringLiteral("/"));
     const auto image   = formats.filter(QStringLiteral("image/"), Qt::CaseInsensitive);
     const auto audio   = formats.filter(QStringLiteral("audio/"), Qt::CaseInsensitive);
@@ -226,8 +225,9 @@ InputBar::insertMimeData(const QMimeData *md)
 }
 
 void
-InputBar::updateAtRoom(const QString &t)
+InputBar::updateTextContentProperties(const QString &t)
 {
+    // check for @room
     bool roomMention = false;
 
     if (t.size() > 4) {
@@ -251,6 +251,63 @@ InputBar::updateAtRoom(const QString &t)
         this->containsAtRoom_ = roomMention;
         emit containsAtRoomChanged();
     }
+
+    // check for invalid commands
+    auto commandName = getCommandAndArgs(t).first;
+    static const QSet<QString> validCommands{QStringLiteral("me"),
+                                             QStringLiteral("react"),
+                                             QStringLiteral("join"),
+                                             QStringLiteral("knock"),
+                                             QStringLiteral("part"),
+                                             QStringLiteral("leave"),
+                                             QStringLiteral("invite"),
+                                             QStringLiteral("kick"),
+                                             QStringLiteral("ban"),
+                                             QStringLiteral("unban"),
+                                             QStringLiteral("redact"),
+                                             QStringLiteral("roomnick"),
+                                             QStringLiteral("shrug"),
+                                             QStringLiteral("fliptable"),
+                                             QStringLiteral("unfliptable"),
+                                             QStringLiteral("sovietflip"),
+                                             QStringLiteral("clear-timeline"),
+                                             QStringLiteral("reset-state"),
+                                             QStringLiteral("rotate-megolm-session"),
+                                             QStringLiteral("md"),
+                                             QStringLiteral("cmark"),
+                                             QStringLiteral("plain"),
+                                             QStringLiteral("rainbow"),
+                                             QStringLiteral("rainbowme"),
+                                             QStringLiteral("notice"),
+                                             QStringLiteral("rainbownotice"),
+                                             QStringLiteral("confetti"),
+                                             QStringLiteral("rainbowconfetti"),
+                                             QStringLiteral("rainfall"),
+                                             QStringLiteral("msgtype"),
+                                             QStringLiteral("goto"),
+                                             QStringLiteral("converttodm"),
+                                             QStringLiteral("converttoroom")};
+    bool hasInvalidCommand    = !commandName.isNull() && !validCommands.contains(commandName);
+    bool hasIncompleteCommand = hasInvalidCommand && '/' + commandName == t;
+
+    bool signalsChanged{false};
+    if (containsInvalidCommand_ != hasInvalidCommand) {
+        containsInvalidCommand_ = hasInvalidCommand;
+        signalsChanged          = true;
+    }
+    if (containsIncompleteCommand_ != hasIncompleteCommand) {
+        containsIncompleteCommand_ = hasIncompleteCommand;
+        signalsChanged             = true;
+    }
+    if (currentCommand_ != commandName) {
+        currentCommand_ = commandName;
+        signalsChanged  = true;
+    }
+    if (signalsChanged) {
+        emit currentCommandChanged();
+        emit containsInvalidCommandChanged();
+        emit containsIncompleteCommandChanged();
+    }
 }
 
 void
@@ -265,7 +322,7 @@ InputBar::setText(const QString &newText)
     if (history_.size() == INPUT_HISTORY_SIZE)
         history_.pop_back();
 
-    updateAtRoom(QLatin1String(""));
+    updateTextContentProperties(QLatin1String(""));
     emit textChanged(newText);
 }
 void
@@ -286,7 +343,7 @@ InputBar::updateState(int selectionStart_,
             history_.front() = text_;
         history_index_ = 0;
 
-        updateAtRoom(text_);
+        updateTextContentProperties(text_);
         // disabled, as it moves the cursor to the end
         // emit textChanged(text_);
     }
@@ -314,7 +371,7 @@ InputBar::previousText()
     else if (text().isEmpty())
         history_index_--;
 
-    updateAtRoom(text());
+    updateTextContentProperties(text());
     return text();
 }
 
@@ -325,7 +382,7 @@ InputBar::nextText()
     if (history_index_ >= INPUT_HISTORY_SIZE)
         history_index_ = 0;
 
-    updateAtRoom(text());
+    updateTextContentProperties(text());
     return text();
 }
 
@@ -343,20 +400,12 @@ InputBar::send()
 
     auto wasEdit = !room->edit().isEmpty();
 
-    if (text().startsWith('/')) {
-        int command_end = text().indexOf(QRegularExpression(QStringLiteral("\\s")));
-        if (command_end == -1)
-            command_end = text().size();
-        auto name = text().mid(1, command_end - 1);
-        auto args = text().mid(command_end + 1);
-        if (name.isEmpty() || name == QLatin1String("/")) {
-            message(args);
-        } else {
-            command(name, args);
-        }
-    } else {
+    auto [commandName, args] = getCommandAndArgs();
+    updateTextContentProperties(text());
+    if (containsIncompleteCommand_)
+        return;
+    if (commandName.isEmpty() || !command(commandName, args))
         message(text());
-    }
 
     if (!wasEdit) {
         history_.push_front(QLatin1String(""));
@@ -368,13 +417,14 @@ void
 InputBar::openFileSelection()
 {
     const QString homeFolder = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
-    const auto fileName =
-      QFileDialog::getOpenFileName(nullptr, tr("Select a file"), homeFolder, tr("All Files (*)"));
+    const QStringList fileNames =
+      QFileDialog::getOpenFileNames(nullptr, tr("Select file(s)"), homeFolder, tr("All Files (*)"));
 
-    if (fileName.isEmpty())
+    if (fileNames.isEmpty())
         return;
 
-    startUploadFromPath(fileName);
+    for (const auto &fileName : fileNames)
+        startUploadFromPath(fileName);
 }
 
 QString
@@ -561,8 +611,9 @@ InputBar::confetti(const QString &body, bool rainbowify)
 {
     auto html = utils::markdownToHtml(body, rainbowify);
 
-    mtx::events::msg::Confetti confetti;
-    confetti.body = body.trimmed().toStdString();
+    mtx::events::msg::ElementEffect confetti;
+    confetti.msgtype = "nic.custom.confetti";
+    confetti.body    = body.trimmed().toStdString();
 
     if (html != body.trimmed().toHtmlEscaped() &&
         ChatPage::instance()->userSettings()->markdown()) {
@@ -575,6 +626,54 @@ InputBar::confetti(const QString &body, bool rainbowify)
     confetti.relations = generateRelations();
 
     room->sendMessageEvent(confetti, mtx::events::EventType::RoomMessage);
+}
+
+void
+InputBar::rainfall(const QString &body)
+{
+    auto html = utils::markdownToHtml(body);
+
+    mtx::events::msg::Unknown rain;
+    rain.msgtype = "io.element.effect.rainfall";
+    rain.body    = body.trimmed().toStdString();
+
+    if (html != body.trimmed().toHtmlEscaped() &&
+        ChatPage::instance()->userSettings()->markdown()) {
+        nlohmann::json j;
+        j["formatted_body"] = html.toStdString();
+        j["format"]         = "org.matrix.custom.html";
+        rain.content        = j.dump();
+        // Remove markdown links by completer
+        rain.body = replaceMatrixToMarkdownLink(body.trimmed()).toStdString();
+    }
+
+    rain.relations = generateRelations();
+
+    room->sendMessageEvent(rain, mtx::events::EventType::RoomMessage);
+}
+
+void
+InputBar::customMsgtype(const QString &msgtype, const QString &body)
+{
+    auto html = utils::markdownToHtml(body);
+
+    mtx::events::msg::Unknown msg;
+    msg.msgtype = msgtype.toStdString();
+    msg.body    = body.trimmed().toStdString();
+
+    if (html != body.trimmed().toHtmlEscaped() &&
+        ChatPage::instance()->userSettings()->markdown()) {
+        nlohmann::json j;
+        j["formatted_body"] = html.toStdString();
+        j["format"]         = "org.matrix.custom.html";
+        msg.content         = j.dump();
+        // Remove markdown links by completer
+        msg.body = replaceMatrixToMarkdownLink(body.trimmed()).toStdString();
+    }
+
+    msg.relations = generateRelations();
+
+    room->sendMessageEvent(msg, mtx::events::EventType::RoomMessage);
 }
 
 void
@@ -718,32 +817,62 @@ InputBar::video(const QString &filename,
     room->sendMessageEvent(video, mtx::events::EventType::RoomMessage);
 }
 
-void
-InputBar::sticker(CombinedImagePackModel *model, int row)
+QPair<QString, QString>
+InputBar::getCommandAndArgs(const QString &currentText) const
 {
-    if (!model || row < 0)
-        return;
+    if (!currentText.startsWith('/'))
+        return {{}, currentText};
 
-    auto img = model->imageAt(row);
-
-    mtx::events::msg::StickerImage sticker{};
-    sticker.info = img.info.value_or(mtx::common::ImageInfo{});
-    sticker.url  = img.url;
-    sticker.body = img.body.empty() ? model->shortcodeAt(row).toStdString() : img.body;
-
-    // workaround for https://github.com/vector-im/element-ios/issues/2353
-    sticker.info.thumbnail_url           = sticker.url;
-    sticker.info.thumbnail_info.mimetype = sticker.info.mimetype;
-    sticker.info.thumbnail_info.size     = sticker.info.size;
-    sticker.info.thumbnail_info.h        = sticker.info.h;
-    sticker.info.thumbnail_info.w        = sticker.info.w;
-
-    sticker.relations = generateRelations();
-
-    room->sendMessageEvent(sticker, mtx::events::EventType::Sticker);
+    int command_end = currentText.indexOf(QRegularExpression(QStringLiteral("\\s")));
+    if (command_end == -1)
+        command_end = currentText.size();
+    auto name = currentText.mid(1, command_end - 1);
+    auto args = currentText.mid(command_end + 1);
+    if (name.isEmpty() || name == QLatin1String("/")) {
+        return {{}, currentText};
+    } else {
+        return {name, args};
+    }
 }
 
 void
+InputBar::sticker(QStringList descriptor)
+{
+    if (descriptor.size() != 3)
+        return;
+
+    auto originalPacks = cache::client()->getImagePacks(room->roomId().toStdString(), true);
+
+    auto source_room = descriptor[0].toStdString();
+    auto state_key   = descriptor[1].toStdString();
+    auto short_code  = descriptor[2].toStdString();
+
+    for (auto &pack : originalPacks) {
+        if (pack.source_room == source_room && pack.state_key == state_key &&
+            pack.pack.images.contains(short_code)) {
+            auto img = pack.pack.images.at(short_code);
+
+            mtx::events::msg::StickerImage sticker{};
+            sticker.info = img.info.value_or(mtx::common::ImageInfo{});
+            sticker.url  = img.url;
+            sticker.body = img.body.empty() ? short_code : img.body;
+
+            // workaround for https://github.com/vector-im/element-ios/issues/2353
+            sticker.info.thumbnail_url           = sticker.url;
+            sticker.info.thumbnail_info.mimetype = sticker.info.mimetype;
+            sticker.info.thumbnail_info.size     = sticker.info.size;
+            sticker.info.thumbnail_info.h        = sticker.info.h;
+            sticker.info.thumbnail_info.w        = sticker.info.w;
+
+            sticker.relations = generateRelations();
+
+            room->sendMessageEvent(sticker, mtx::events::EventType::Sticker);
+            break;
+        }
+    }
+}
+
+bool
 InputBar::command(const QString &command, QString args)
 {
     if (command == QLatin1String("me")) {
@@ -826,21 +955,25 @@ InputBar::command(const QString &command, QString args)
         confetti(args, false);
     } else if (command == QLatin1String("rainbowconfetti")) {
         confetti(args, true);
+    } else if (command == QLatin1String("rainfall")) {
+        rainfall(args);
+    } else if (command == QLatin1String("msgtype")) {
+        customMsgtype(args.section(' ', 0, 0), args.section(' ', 1, -1));
     } else if (command == QLatin1String("goto")) {
         // Goto has three different modes:
         // 1 - Going directly to a given event ID
         if (args[0] == '$') {
             room->showEvent(args);
-            return;
+            return true;
         }
         // 2 - Going directly to a given message index
         if (args[0] >= '0' && args[0] <= '9') {
             room->showEvent(args);
-            return;
+            return true;
         }
         // 3 - Matrix URI handler, as if you clicked the URI
         if (ChatPage::instance()->handleMatrixUri(args)) {
-            return;
+            return true;
         }
         nhlog::net()->error("Could not resolve goto: {}", args.toStdString());
     } else if (command == QLatin1String("converttodm")) {
@@ -848,7 +981,11 @@ InputBar::command(const QString &command, QString args)
                                 cache::getMembers(this->room->roomId().toStdString(), 0, -1));
     } else if (command == QLatin1String("converttoroom")) {
         utils::removeDirectFromRoom(this->room->roomId());
+    } else {
+        return false;
     }
+
+    return true;
 }
 
 MediaUpload::MediaUpload(std::unique_ptr<QIODevice> source_,

@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -167,6 +165,7 @@ ApplicationWindow {
                         horizontalAlignment: TextEdit.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: packinfoC.width - Nheko.paddingLarge * 2
+                        textFormat: TextEdit.PlainText
                     }
 
                     MatrixText {
@@ -175,6 +174,7 @@ ApplicationWindow {
                         horizontalAlignment: TextEdit.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: packinfoC.width - Nheko.paddingLarge * 2
+                        textFormat: TextEdit.PlainText
                     }
 
                     GridLayout {

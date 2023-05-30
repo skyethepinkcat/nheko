@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -53,7 +51,7 @@ Item {
         width: parent.width? parent.width: 0 // this should get rid of "cannot read property 'width' of null"
 
         DelegateChoice {
-            roleValue: MtxEvent.UnknownMessage
+            roleValue: MtxEvent.UnknownEvent
 
             Placeholder {
                 typeString: d.typeString
@@ -104,7 +102,21 @@ Item {
         }
 
         DelegateChoice {
-            roleValue: MtxEvent.ConfettiMessage
+            roleValue: MtxEvent.UnknownMessage
+
+            TextMessage {
+                formatted: d.formattedBody
+                body: d.body
+                isOnlyEmoji: d.isOnlyEmoji
+                isReply: d.isReply
+                keepFullText: d.keepFullText
+                metadataWidth: d.metadataWidth
+            }
+
+        }
+
+        DelegateChoice {
+            roleValue: MtxEvent.ElementEffectMessage
 
             TextMessage {
                 formatted: d.formattedBody

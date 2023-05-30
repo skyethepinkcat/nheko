@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -100,6 +97,8 @@ public:
         return "Nheko on Windows";
 #elif defined(Q_OS_FREEBSD)
         return "Nheko on FreeBSD";
+#elif defined(Q_OS_OPENBSD)
+        return "Nheko on OpenBSD";
 #else
         return "Nheko";
 #endif

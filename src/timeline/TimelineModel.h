@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -101,16 +99,17 @@ enum EventType
     Widget,
     /// m.room.message
     AudioMessage,
-    ConfettiMessage,
+    ElementEffectMessage,
     EmoteMessage,
     FileMessage,
     ImageMessage,
     LocationMessage,
     NoticeMessage,
     TextMessage,
+    UnknownMessage,
     VideoMessage,
     Redacted,
-    UnknownMessage,
+    UnknownEvent,
     KeyVerificationRequest,
     KeyVerificationStart,
     KeyVerificationMac,
@@ -268,6 +267,13 @@ public:
     };
     Q_ENUM(Roles);
 
+    enum SpecialEffect
+    {
+        Confetti,
+        Rainfall,
+    };
+    Q_DECLARE_FLAGS(SpecialEffects, SpecialEffect)
+
     QHash<int, QByteArray> roleNames() const override;
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
@@ -314,6 +320,7 @@ public:
     Q_INVOKABLE void openMedia(const QString &eventId);
     Q_INVOKABLE void cacheMedia(const QString &eventId);
     Q_INVOKABLE bool saveMedia(const QString &eventId) const;
+    Q_INVOKABLE bool copyMedia(const QString &eventId) const;
     Q_INVOKABLE void showEvent(QString eventId);
     Q_INVOKABLE void copyLinkToEvent(const QString &eventId) const;
 
@@ -452,6 +459,8 @@ signals:
     void scrollToIndex(int index);
     void confetti();
     void confettiDone();
+    void rainfall();
+    void rainfallDone();
 
     void lastMessageChanged();
     void notificationsChanged();
@@ -475,7 +484,7 @@ signals:
     void isDirectChanged();
     void directChatOtherUserIdChanged();
     void permissionsChanged();
-    void forwardToRoom(mtx::events::collections::TimelineEvents *e, QString roomId);
+    void forwardToRoom(mtx::events::collections::TimelineEvents const *e, QString roomId);
 
     void scrollTargetChanged();
 
@@ -523,14 +532,16 @@ private:
     std::string last_event_id;
     std::string fullyReadEventId_;
 
-    // TODO (Loren): This should hopefully handle more than just confetti in the future
     bool needsSpecialEffects_ = false;
+    QFlags<SpecialEffect> specialEffects_;
 
     std::unique_ptr<RoomSummary, DeleteLaterDeleter> parentSummary = nullptr;
     bool parentChecked                                             = false;
 
     friend void EventStore::refetchOnlineKeyBackupKeys(TimelineModel *room);
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(TimelineModel::SpecialEffects)
 
 template<class T>
 void

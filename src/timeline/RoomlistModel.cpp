@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -224,7 +222,7 @@ RoomlistModel::data(const QModelIndex &index, int role) const
             case Roles::RoomName:
                 return tr("No preview available");
             case Roles::LastMessage:
-                return QString();
+                return tr("This room is possibly inaccessible");
             case Roles::Time:
                 return QString();
             case Roles::Timestamp:
@@ -798,11 +796,13 @@ RoomlistModel::setCurrentRoom(const QString &roomid)
             p.roomName_         = QString::fromStdString(i->name);
             p.roomTopic_        = QString::fromStdString(i->topic);
             p.roomAvatarUrl_    = QString::fromStdString(i->avatar_url);
+            p.isFetched_        = true;
             currentRoomPreview_ = std::move(p);
             nhlog::ui()->debug("Switched to (preview): {}",
                                currentRoomPreview_->roomid_.toStdString());
         } else {
             p.roomid_           = roomid;
+            p.isFetched_        = false;
             currentRoomPreview_ = p;
             nhlog::ui()->debug("Switched to (empty): {}",
                                currentRoomPreview_->roomid_.toStdString());
@@ -886,15 +886,25 @@ FilteredRoomlistModel::lessThan(const QModelIndex &left, const QModelIndex &righ
         return a_importance > b_importance;
     }
 
-    // Now sort by recency
+    // Now sort by recency or room name
     // Zero if empty, otherwise the time that the event occured
-    uint64_t a_recency = sourceModel()->data(left_idx, RoomlistModel::Timestamp).toULongLong();
-    uint64_t b_recency = sourceModel()->data(right_idx, RoomlistModel::Timestamp).toULongLong();
 
-    if (a_recency != b_recency)
-        return a_recency > b_recency;
-    else
-        return left.row() < right.row();
+    if (this->sortByAlphabet) {
+        QString a_order = sourceModel()->data(left_idx, RoomlistModel::RoomName).toString();
+        QString b_order = sourceModel()->data(right_idx, RoomlistModel::RoomName).toString();
+
+        auto comp = a_order.compare(b_order, Qt::CaseInsensitive);
+        if (comp != 0)
+            return comp < 0;
+    } else {
+        uint64_t a_order = sourceModel()->data(left_idx, RoomlistModel::Timestamp).toULongLong();
+        uint64_t b_order = sourceModel()->data(right_idx, RoomlistModel::Timestamp).toULongLong();
+
+        if (a_order != b_order)
+            return a_order > b_order;
+    }
+
+    return left.row() < right.row();
 }
 
 FilteredRoomlistModel::FilteredRoomlistModel(RoomlistModel *model, QObject *parent)
@@ -902,14 +912,23 @@ FilteredRoomlistModel::FilteredRoomlistModel(RoomlistModel *model, QObject *pare
   , roomlistmodel(model)
 {
     this->sortByImportance = UserSettings::instance()->sortByImportance();
+    this->sortByAlphabet   = UserSettings::instance()->sortByAlphabet();
     setSourceModel(model);
     setDynamicSortFilter(true);
 
     QObject::connect(UserSettings::instance().get(),
-                     &UserSettings::roomSortingChanged,
+                     &UserSettings::roomSortingChangedImportance,
                      this,
                      [this](bool sortByImportance_) {
                          this->sortByImportance = sortByImportance_;
+                         invalidate();
+                     });
+
+    QObject::connect(UserSettings::instance().get(),
+                     &UserSettings::roomSortingChangedAlphabetical,
+                     this,
+                     [this](bool sortByAlphabet_) {
+                         this->sortByAlphabet = sortByAlphabet_;
                          invalidate();
                      });
 
@@ -1100,6 +1119,15 @@ FilteredRoomlistModel::filterAcceptsRow(int sourceRow, const QModelIndex &) cons
             return !sourceModel()
                       ->data(sourceModel()->index(sourceRow, 0), RoomlistModel::IsDirect)
                       .toBool();
+        }
+
+        // If it is a preview but it can't be fetched, it is probably an inaccessible private room.
+        // Hide it if the user isn't an admin.
+        auto index = sourceModel()->index(sourceRow, 0);
+        if (sourceModel()->data(index, RoomlistModel::IsPreview).toBool() &&
+            !sourceModel()->data(index, RoomlistModel::IsPreviewFetched).toBool() &&
+            !Permissions(filterStr).canChange(qml_mtx_events::SpaceChild)) {
+            return false;
         }
 
         return true;

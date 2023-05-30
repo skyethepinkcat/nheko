@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -178,6 +175,8 @@ signals:
                        bool promptForConfirmation = true);
     void newOnlineKeyBackupAvailable();
 
+    void callFunctionOnGuiThread(std::function<void()>);
+
 private slots:
     void logout();
     void removeRoom(const QString &room_id);
@@ -224,6 +223,8 @@ private:
     CallManager *callManager_;
 
     std::unique_ptr<mtx::pushrules::PushRuleEvaluator> pushrules;
+
+    QDateTime lastSpacesUpdate = QDateTime::currentDateTime();
 };
 
 template<class Collection>

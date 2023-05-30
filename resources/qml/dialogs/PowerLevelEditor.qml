@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,6 +21,7 @@ ApplicationWindow {
     minimumWidth: 300
     minimumHeight: 400
     height: 600
+    width: 300
 
     title: qsTr("Permissions in %1").arg(roomSettings.roomName);
 
@@ -50,30 +50,10 @@ ApplicationWindow {
             width: parent.width
             palette: Nheko.colors
 
-            component TabB : TabButton {
-                id: control
-
-                contentItem: Text {
-                    text: control.text
-                    font: control.font
-                    opacity: enabled ? 1.0 : 0.3
-                    color: control.down ? Nheko.colors.highlightedText : Nheko.colors.text
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
-                }
-
-                background: Rectangle {
-                    border.color: control.down ? Nheko.colors.highlight : Nheko.theme.separator
-                    color: control.checked ? Nheko.colors.highlight : Nheko.colors.base
-                    border.width: 1
-                    radius: 2
-                }
-            }
-            TabB {
+            NhekoTabButton {
                 text: qsTr("Roles")
             }
-            TabB {
+            NhekoTabButton {
                 text: qsTr("Users")
             }
         }

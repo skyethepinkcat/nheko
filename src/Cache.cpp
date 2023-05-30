@@ -1,7 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,7 +38,7 @@
 
 //! Should be changed when a breaking change occurs in the cache format.
 //! This will reset client's data.
-static const std::string CURRENT_CACHE_FORMAT_VERSION{"2022.11.06"};
+static const std::string CURRENT_CACHE_FORMAT_VERSION{"2023.03.12"};
 
 //! Keys used for the DB
 static const std::string_view NEXT_BATCH_KEY("next_batch");
@@ -49,8 +46,7 @@ static const std::string_view OLM_ACCOUNT_KEY("olm_account");
 static const std::string_view CACHE_FORMAT_VERSION_KEY("cache_format_version");
 static const std::string_view CURRENT_ONLINE_BACKUP_VERSION("current_online_backup_version");
 
-static constexpr auto MAX_DBS    = 32384UL;
-static constexpr auto BATCH_SIZE = 100;
+static constexpr auto MAX_DBS = 32384UL;
 
 #if Q_PROCESSOR_WORDSIZE >= 5 // 40-bit or more, up to 2^(8*WORDSIZE) words addressable.
 static constexpr auto DB_SIZE                 = 32ULL * 1024ULL * 1024ULL * 1024ULL; // 32 GB
@@ -294,7 +290,12 @@ Cache::setup()
         //
         // 2022-10-28: Disable the nosync flags again in the hope to crack down on some database
         // corruption.
-        env_.open(cacheDirectory_.toStdString().c_str()); //, MDB_NOMETASYNC | MDB_NOSYNC);
+        // 2023-02-23: Reenable the nosync flags. There was no measureable benefit to resiliency,
+        // but sync causes frequent lag sometimes even for the whole system. Possibly the data
+        // corruption is an lmdb or filesystem bug. See
+        // https://github.com/Nheko-Reborn/nheko/issues/1355
+        // https://github.com/Nheko-Reborn/nheko/issues/1303
+        env_.open(cacheDirectory_.toStdString().c_str(), MDB_NOMETASYNC | MDB_NOSYNC);
     } catch (const lmdb::error &e) {
         if (e.code() != MDB_VERSION_MISMATCH && e.code() != MDB_INVALID) {
             throw std::runtime_error("LMDB initialization failed" + std::string(e.what()));
@@ -1283,9 +1284,8 @@ Cache::runMigrations()
                                else if (j["token"].get<std::string>() != oldMessages.prev_batch)
                                    break;
 
-                               mtx::events::collections::TimelineEvent te;
-                               from_json(j["event"], te);
-                               oldMessages.events.push_back(te.data);
+                               oldMessages.events.push_back(
+                                 j["event"].get<mtx::events::collections::TimelineEvents>());
                            }
                            // messages were stored in reverse order, so we
                            // need to reverse them
@@ -1514,6 +1514,64 @@ Cache::runMigrations()
 
            return true;
        }},
+      {"2023.03.12",
+       [this]() {
+           try {
+               auto txn      = lmdb::txn::begin(env_, nullptr);
+               auto room_ids = getRoomIds(txn);
+
+               for (const auto &room_id : room_ids) {
+                   try {
+                       auto oldStateskeyDb =
+                         lmdb::dbi::open(txn,
+                                         std::string(room_id + "/state_by_key").c_str(),
+                                         MDB_CREATE | MDB_DUPSORT);
+                       lmdb::dbi_set_dupsort(
+                         txn, oldStateskeyDb, +[](const MDB_val *a, const MDB_val *b) {
+                             auto get_skey = [](const MDB_val *v) {
+                                 return nlohmann::json::parse(
+                                          std::string_view(static_cast<const char *>(v->mv_data),
+                                                           v->mv_size))
+                                   .value("key", "");
+                             };
+
+                             return get_skey(a).compare(get_skey(b));
+                         });
+                       auto newStateskeyDb = getStatesKeyDb(txn, room_id);
+
+                       // convert the dupsort format
+                       {
+                           auto cursor = lmdb::cursor::open(txn, oldStateskeyDb);
+                           std::string_view ev_type, data;
+                           bool start = true;
+                           while (cursor.get(ev_type, data, start ? MDB_FIRST : MDB_NEXT)) {
+                               start = false;
+
+                               auto j =
+                                 nlohmann::json::parse(std::string_view(data.data(), data.size()));
+
+                               newStateskeyDb.put(
+                                 txn, ev_type, j.value("key", "") + '\0' + j.value("id", ""));
+                           }
+                       }
+
+                       // delete old db
+                       lmdb::dbi_drop(txn, oldStateskeyDb, true);
+                   } catch (std::exception &e) {
+                       nhlog::db()->error("While migrating state events from {}, ignoring error {}",
+                                          room_id,
+                                          e.what());
+                   }
+               }
+               txn.commit();
+           } catch (const lmdb::error &) {
+               nhlog::db()->critical("Failed to convert states key database in migration!");
+               return false;
+           }
+
+           nhlog::db()->info("Successfully updated states key database format.");
+           return true;
+       }},
     };
 
     nhlog::db()->info("Running migrations, this may take a while!");
@@ -1734,7 +1792,9 @@ Cache::updateState(const std::string &room, const mtx::responses::StateEvents &s
     updatedInfo.topic      = getRoomTopic(txn, statesdb).toStdString();
     updatedInfo.avatar_url = getRoomAvatarUrl(txn, statesdb, membersdb).toStdString();
     updatedInfo.version    = getRoomVersion(txn, statesdb).toStdString();
-    updatedInfo.is_space   = getRoomIsSpace(txn, statesdb);
+
+    updatedInfo.is_space      = getRoomIsSpace(txn, statesdb);
+    updatedInfo.is_tombstoned = getRoomIsTombstoned(txn, statesdb);
 
     roomsDb_.put(txn, room, nlohmann::json(updatedInfo).dump());
     updateSpaces(txn, {room}, {room});
@@ -1842,6 +1902,14 @@ Cache::saveState(const mtx::responses::Sync &res)
         auto membersdb   = getMembersDb(txn, room.first);
         auto eventsDb    = getEventsDb(txn, room.first);
 
+        // nhlog::db()->critical(
+        //   "Saving events for room: {}, state {}, timeline {}, account {}, ephemeral {}",
+        //   room.first,
+        //   room.second.state.events.size(),
+        //   room.second.timeline.events.size(),
+        //   room.second.account_data.events.size(),
+        //   room.second.ephemeral.events.size());
+
         saveStateEvents(
           txn, statesdb, stateskeydb, membersdb, eventsDb, room.first, room.second.state.events);
         saveStateEvents(
@@ -1850,13 +1918,12 @@ Cache::saveState(const mtx::responses::Sync &res)
         saveTimelineMessages(txn, eventsDb, room.first, room.second.timeline);
 
         RoomInfo updatedInfo;
+        std::string_view originalRoomInfoDump;
         {
             // retrieve the old tags and modification ts
-            std::string_view data;
-            if (roomsDb_.get(txn, room.first, data)) {
+            if (roomsDb_.get(txn, room.first, originalRoomInfoDump)) {
                 try {
-                    RoomInfo tmp = nlohmann::json::parse(std::string_view(data.data(), data.size()))
-                                     .get<RoomInfo>();
+                    RoomInfo tmp     = nlohmann::json::parse(originalRoomInfoDump).get<RoomInfo>();
                     updatedInfo.tags = std::move(tmp.tags);
 
                     updatedInfo.approximate_last_modification_ts =
@@ -1864,7 +1931,7 @@ Cache::saveState(const mtx::responses::Sync &res)
                 } catch (const nlohmann::json::exception &e) {
                     nhlog::db()->warn("failed to parse room info: room_id ({}), {}: {}",
                                       room.first,
-                                      std::string(data.data(), data.size()),
+                                      originalRoomInfoDump,
                                       e.what());
                 }
             }
@@ -1898,14 +1965,24 @@ Cache::saveState(const mtx::responses::Sync &res)
             bool room_has_space_update = false;
             for (const auto &e : room.second.state.events) {
                 if (auto se = std::get_if<StateEvent<state::space::Parent>>(&e)) {
-                    spaces_with_updates.insert(se->state_key);
-                    room_has_space_update = true;
+                    if (se->state_key.empty()) {
+                        nhlog::db()->warn("Skipping space parent with empty state key in room {}",
+                                          room.first);
+                    } else {
+                        spaces_with_updates.insert(se->state_key);
+                        room_has_space_update = true;
+                    }
                 }
             }
             for (const auto &e : room.second.timeline.events) {
                 if (auto se = std::get_if<StateEvent<state::space::Parent>>(&e)) {
-                    spaces_with_updates.insert(se->state_key);
-                    room_has_space_update = true;
+                    if (se->state_key.empty()) {
+                        nhlog::db()->warn("Skipping space child with empty state key in room {}",
+                                          room.first);
+                    } else {
+                        spaces_with_updates.insert(se->state_key);
+                        room_has_space_update = true;
+                    }
                 }
             }
 
@@ -1953,7 +2030,12 @@ Cache::saveState(const mtx::responses::Sync &res)
               std::visit([](const auto &e) -> uint64_t { return e.origin_server_ts; }, e);
         }
 
-        roomsDb_.put(txn, room.first, nlohmann::json(updatedInfo).dump());
+        if (auto newRoomInfoDump = nlohmann::json(updatedInfo).dump();
+            newRoomInfoDump != originalRoomInfoDump) {
+            // nhlog::db()->critical(
+            //   "Writing out new room info:\n{}\n{}", originalRoomInfoDump, newRoomInfoDump);
+            roomsDb_.put(txn, room.first, newRoomInfoDump);
+        }
 
         for (const auto &e : room.second.ephemeral.events) {
             if (auto receiptsEv =
@@ -2084,7 +2166,20 @@ Cache::savePresence(
   const std::vector<mtx::events::Event<mtx::events::presence::Presence>> &presenceUpdates)
 {
     for (const auto &update : presenceUpdates) {
-        presenceDb_.put(txn, update.sender, nlohmann::json(update.content).dump());
+        auto toWrite = nlohmann::json(update.content);
+        // Nheko currently doesn't use those and it causes lots of db writes :)
+        toWrite.erase("currently_active");
+        toWrite.erase("last_active_ago");
+        auto toWriteStr = toWrite.dump();
+
+        std::string_view oldPresenceVal;
+
+        presenceDb_.get(txn, update.sender, oldPresenceVal);
+        if (oldPresenceVal != toWriteStr) {
+            // nhlog::db()->critical(
+            //   "Presence update for {}: {} -> {}", update.sender, oldPresenceVal, toWriteStr);
+            presenceDb_.put(txn, update.sender, toWriteStr);
+        }
     }
 }
 
@@ -2275,63 +2370,7 @@ Cache::previousBatchToken(const std::string &room_id)
     }
 }
 
-Cache::Messages
-Cache::getTimelineMessages(lmdb::txn &txn, const std::string &room_id, uint64_t index, bool forward)
-{
-    // TODO(nico): Limit the messages returned by this maybe?
-    auto orderDb  = getOrderToMessageDb(txn, room_id);
-    auto eventsDb = getEventsDb(txn, room_id);
-
-    Messages messages{};
-
-    std::string_view indexVal, event_id;
-
-    auto cursor = lmdb::cursor::open(txn, orderDb);
-    if (index == std::numeric_limits<uint64_t>::max()) {
-        if (!cursor.get(indexVal, event_id, forward ? MDB_FIRST : MDB_LAST)) {
-            messages.end_of_cache = true;
-            return messages;
-        }
-    } else {
-        if (!cursor.get(indexVal, event_id, MDB_SET)) {
-            messages.end_of_cache = true;
-            return messages;
-        }
-    }
-
-    int counter = 0;
-
-    bool ret;
-    while ((ret = cursor.get(indexVal,
-                             event_id,
-                             counter == 0 ? (forward ? MDB_FIRST : MDB_LAST)
-                                          : (forward ? MDB_NEXT : MDB_PREV))) &&
-           counter++ < BATCH_SIZE) {
-        std::string_view event;
-        bool success = eventsDb.get(txn, event_id, event);
-        if (!success)
-            continue;
-
-        mtx::events::collections::TimelineEvent te;
-        try {
-            from_json(nlohmann::json::parse(event), te);
-        } catch (std::exception &e) {
-            nhlog::db()->error("Failed to parse message from cache {}", e.what());
-            continue;
-        }
-
-        messages.timeline.events.push_back(std::move(te.data));
-    }
-    cursor.close();
-
-    // std::reverse(timeline.events.begin(), timeline.events.end());
-    messages.next_index   = lmdb::from_sv<uint64_t>(indexVal);
-    messages.end_of_cache = !ret;
-
-    return messages;
-}
-
-std::optional<mtx::events::collections::TimelineEvent>
+std::optional<mtx::events::collections::TimelineEvents>
 Cache::getEvent(const std::string &room_id, std::string_view event_id)
 {
     auto txn      = ro_txn(env_);
@@ -2342,24 +2381,21 @@ Cache::getEvent(const std::string &room_id, std::string_view event_id)
     if (!success)
         return {};
 
-    mtx::events::collections::TimelineEvent te;
     try {
-        from_json(nlohmann::json::parse(event), te);
+        return nlohmann::json::parse(event).get<mtx::events::collections::TimelineEvents>();
     } catch (std::exception &e) {
         nhlog::db()->error("Failed to parse message from cache {}", e.what());
         return std::nullopt;
     }
-
-    return te;
 }
 void
 Cache::storeEvent(const std::string &room_id,
                   const std::string &event_id,
-                  const mtx::events::collections::TimelineEvent &event)
+                  const mtx::events::collections::TimelineEvents &event)
 {
     auto txn        = lmdb::txn::begin(env_);
     auto eventsDb   = getEventsDb(txn, room_id);
-    auto event_json = mtx::accessors::serialize_event(event.data);
+    auto event_json = mtx::accessors::serialize_event(event);
     eventsDb.put(txn, event_id, event_json.dump());
     txn.commit();
 }
@@ -2367,17 +2403,17 @@ Cache::storeEvent(const std::string &room_id,
 void
 Cache::replaceEvent(const std::string &room_id,
                     const std::string &event_id,
-                    const mtx::events::collections::TimelineEvent &event)
+                    const mtx::events::collections::TimelineEvents &event)
 {
     auto txn         = lmdb::txn::begin(env_);
     auto eventsDb    = getEventsDb(txn, room_id);
     auto relationsDb = getRelationsDb(txn, room_id);
-    auto event_json  = mtx::accessors::serialize_event(event.data).dump();
+    auto event_json  = mtx::accessors::serialize_event(event).dump();
 
     {
         eventsDb.del(txn, event_id);
         eventsDb.put(txn, event_id, event_json);
-        for (const auto &relation : mtx::accessors::relations(event.data).relations) {
+        for (const auto &relation : mtx::accessors::relations(event).relations) {
             relationsDb.put(txn, relation.event_id, event_id);
         }
     }
@@ -2478,9 +2514,13 @@ Cache::roomNamesAndAliases()
                 alias = aliases->content.alias;
             }
 
-            result.push_back(RoomNameAlias{.id    = std::move(room_id_str),
-                                           .name  = std::move(info.name),
-                                           .alias = std::move(alias)});
+            result.push_back(RoomNameAlias{
+              .id              = std::move(room_id_str),
+              .name            = std::move(info.name),
+              .alias           = std::move(alias),
+              .recent_activity = info.approximate_last_modification_ts,
+              .is_tombstoned   = info.is_tombstoned,
+            });
         } catch (std::exception &e) {
             nhlog::db()->warn("Failed to add room {} to result: {}", room_id, e.what());
         }
@@ -3011,6 +3051,28 @@ Cache::getRoomIsSpace(lmdb::txn &txn, lmdb::dbi &statesdb)
     return false;
 }
 
+bool
+Cache::getRoomIsTombstoned(lmdb::txn &txn, lmdb::dbi &statesdb)
+{
+    using namespace mtx::events;
+    using namespace mtx::events::state;
+
+    std::string_view event;
+    bool res = statesdb.get(txn, to_string(mtx::events::EventType::RoomCreate), event);
+
+    if (res) {
+        try {
+            StateEvent<Tombstone> msg = nlohmann::json::parse(event).get<StateEvent<Tombstone>>();
+
+            return true;
+        } catch (const nlohmann::json::exception &e) {
+            nhlog::db()->warn("failed to parse m.room.tombstone event: {}", e.what());
+        }
+    }
+
+    return false;
+}
+
 QString
 Cache::getInviteRoomName(lmdb::txn &txn, lmdb::dbi &statesdb, lmdb::dbi &membersdb)
 {
@@ -3151,6 +3213,36 @@ Cache::joinedRooms()
     roomsCursor.close();
 
     return room_ids;
+}
+
+std::map<std::string, RoomInfo>
+Cache::getCommonRooms(const std::string &user_id)
+{
+    std::map<std::string, RoomInfo> result;
+
+    auto txn = ro_txn(env_);
+
+    std::string_view room_id;
+    std::string_view room_data;
+    std::string_view member_info;
+
+    auto roomsCursor = lmdb::cursor::open(txn, roomsDb_);
+    while (roomsCursor.get(room_id, room_data, MDB_NEXT)) {
+        try {
+            if (getMembersDb(txn, std::string(room_id)).get(txn, user_id, member_info)) {
+                RoomInfo tmp = nlohmann::json::parse(std::move(room_data)).get<RoomInfo>();
+                result.emplace(std::string(room_id), std::move(tmp));
+            }
+        } catch (std::exception &e) {
+            nhlog::db()->warn("Failed to read common room for member ({}) in room ({}): {}",
+                              user_id,
+                              room_id,
+                              e.what());
+        }
+    }
+    roomsCursor.close();
+
+    return result;
 }
 
 std::optional<MemberInfo>
@@ -3314,19 +3406,19 @@ Cache::isRoomMember(const std::string &user_id, const std::string &room_id)
 
 void
 Cache::savePendingMessage(const std::string &room_id,
-                          const mtx::events::collections::TimelineEvent &message)
+                          const mtx::events::collections::TimelineEvents &message)
 {
     auto txn      = lmdb::txn::begin(env_);
     auto eventsDb = getEventsDb(txn, room_id);
 
     mtx::responses::Timeline timeline;
-    timeline.events.push_back(message.data);
+    timeline.events.push_back(message);
     saveTimelineMessages(txn, eventsDb, room_id, timeline);
 
     auto pending = getPendingMessagesDb(txn, room_id);
 
     int64_t now = QDateTime::currentMSecsSinceEpoch();
-    pending.put(txn, lmdb::to_sv(now), mtx::accessors::event_id(message.data));
+    pending.put(txn, lmdb::to_sv(now), mtx::accessors::event_id(message));
 
     txn.commit();
 }
@@ -3353,7 +3445,7 @@ Cache::pendingEvents(const std::string &room_id)
     return related_ids;
 }
 
-std::optional<mtx::events::collections::TimelineEvent>
+std::optional<mtx::events::collections::TimelineEvents>
 Cache::firstPendingMessage(const std::string &room_id)
 {
     auto txn     = lmdb::txn::begin(env_);
@@ -3371,8 +3463,8 @@ Cache::firstPendingMessage(const std::string &room_id)
             }
 
             try {
-                mtx::events::collections::TimelineEvent te;
-                from_json(nlohmann::json::parse(event), te);
+                mtx::events::collections::TimelineEvents te =
+                  nlohmann::json::parse(event).get<mtx::events::collections::TimelineEvents>();
 
                 pendingCursor.close();
                 return te;
@@ -3506,18 +3598,38 @@ Cache::saveTimelineMessages(lmdb::txn &txn,
             if (!success)
                 continue;
 
-            mtx::events::collections::TimelineEvent te;
             try {
-                from_json(nlohmann::json::parse(std::string_view(oldEvent.data(), oldEvent.size())),
-                          te);
+                auto te = nlohmann::json::parse(std::string_view(oldEvent.data(), oldEvent.size()))
+                            .get<mtx::events::collections::TimelineEvents>();
+
                 // overwrite the content and add redation data
                 std::visit(
-                  [redaction](auto &ev) {
+                  [&redaction, &room_id, &txn, &eventsDb, this](auto &ev) {
                       ev.unsigned_data.redacted_because = *redaction;
                       ev.unsigned_data.redacted_by      = redaction->event_id;
+
+                      if constexpr (isStateEvent_<decltype(ev)>) {
+                          auto statesdb    = getStatesDb(txn, room_id);
+                          auto stateskeydb = getStatesKeyDb(txn, room_id);
+                          auto membersdb   = getMembersDb(txn, room_id);
+                          mtx::events::StateEvent<mtx::events::msg::Redacted> redactedEvent;
+                          redactedEvent.event_id  = ev.event_id;
+                          redactedEvent.state_key = ev.state_key;
+                          redactedEvent.type      = ev.type;
+                          nhlog::db()->critical("Redacting: {}",
+                                                nlohmann::json(redactedEvent).dump(2));
+
+                          saveStateEvent(txn,
+                                         statesdb,
+                                         stateskeydb,
+                                         membersdb,
+                                         eventsDb,
+                                         room_id,
+                                         mtx::events::collections::StateEvents{redactedEvent});
+                      }
                   },
-                  te.data);
-                event = mtx::accessors::serialize_event(te.data);
+                  te);
+                event = mtx::accessors::serialize_event(te);
                 event["content"].clear();
 
             } catch (std::exception &e) {
@@ -4098,8 +4210,15 @@ Cache::getImagePacks(const std::string &room_id, std::optional<bool> stickers)
 
           for (const auto &parent :
                getStateEventsWithType<mtx::events::state::space::Parent>(txn, current_room)) {
-              if (parent.content.canonical && parent.content.via && !parent.content.via->empty())
-                  addRoomAndCanonicalParents(parent.state_key);
+              if (parent.content.canonical && parent.content.via && !parent.content.via->empty()) {
+                  try {
+                      addRoomAndCanonicalParents(parent.state_key);
+                  } catch (const lmdb::error &) {
+                      nhlog::db()->debug("Skipping events from parent community, because we are "
+                                         "not joined to it: {}",
+                                         parent.state_key);
+                  }
+              }
           }
       };
 
@@ -5001,6 +5120,7 @@ to_json(nlohmann::json &j, const RoomInfo &info)
     j["version"]      = info.version;
     j["is_invite"]    = info.is_invite;
     j["is_space"]     = info.is_space;
+    j["tombst"]       = info.is_tombstoned;
     j["join_rule"]    = info.join_rule;
     j["guest_access"] = info.guest_access;
 
@@ -5024,8 +5144,11 @@ from_json(const nlohmann::json &j, RoomInfo &info)
     info.avatar_url = j.at("avatar_url").get<std::string>();
     info.version    = j.value(
       "version", QCoreApplication::translate("RoomInfo", "no version stored").toStdString());
-    info.is_invite    = j.at("is_invite").get<bool>();
-    info.is_space     = j.value("is_space", false);
+
+    info.is_invite     = j.at("is_invite").get<bool>();
+    info.is_space      = j.value("is_space", false);
+    info.is_tombstoned = j.value("tombst", false);
+
     info.join_rule    = j.at("join_rule").get<mtx::events::state::JoinRule>();
     info.guest_access = j.at("guest_access").get<bool>();
 
@@ -5071,8 +5194,8 @@ to_json(nlohmann::json &j, const MemberInfo &info)
 void
 from_json(const nlohmann::json &j, MemberInfo &info)
 {
-    info.name       = j.at("name").get<std::string>();
-    info.avatar_url = j.at("avatar_url").get<std::string>();
+    info.name       = j.value("name", "");
+    info.avatar_url = j.value("avatar_url", "");
     info.is_direct  = j.value("is_direct", false);
     info.reason     = j.value("reason", "");
 }

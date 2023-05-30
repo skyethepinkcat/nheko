@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,8 +9,9 @@
 #include "MatrixClient.h"
 #include "mtx/responses/profile.hpp"
 
-InviteesModel::InviteesModel(QObject *parent)
+InviteesModel::InviteesModel(TimelineModel *room, QObject *parent)
   : QAbstractListModel{parent}
+  , room_{room}
 {
 }
 

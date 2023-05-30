@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -728,9 +727,12 @@ struct PowerLevelApplier
           [self = *this](const mtx::responses::EventId &, mtx::http::RequestErr e) mutable {
               if (e) {
                   if (e->status_code == 429 && e->matrix_error.retry_after.count() != 0) {
-                      QTimer::singleShot(e->matrix_error.retry_after,
-                                         ChatPage::instance(),
-                                         [self = std::move(self)]() mutable { self.next(); });
+                      ChatPage::instance()->callFunctionOnGuiThread(
+                        [self = std::move(self), interval = e->matrix_error.retry_after]() {
+                            QTimer::singleShot(interval,
+                                               ChatPage::instance(),
+                                               [self = std::move(self)]() mutable { self.next(); });
+                        });
                       return;
                   }
 

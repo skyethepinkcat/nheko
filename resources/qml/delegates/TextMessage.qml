@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -28,12 +26,12 @@ MatrixText {
         border-width: 1px;
         border-collapse: collapse;
         border-style: solid;
+        border-color: " + Nheko.colors.text + ";
+        background-color: " + Nheko.colors.alternateBase + ";
     }
     table th,
     table td {
-        bgcolor: " + Nheko.colors.alternateBase + ";
-        border-collapse: collapse;
-        border: 1px solid " + Nheko.colors.text + ";
+        padding: " + Math.ceil(fontMetrics.lineSpacing/2) + "px;
     }
     blockquote { margin-left: 1em; }
     " + (!Settings.mobileMode ? "span[data-mx-spoiler] {

@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -99,6 +98,12 @@ NhekoDBusBackend::directChat(const QString &userId) const
 {
     bringWindowToTop();
     ChatPage::instance()->startChat(userId);
+}
+
+QString
+NhekoDBusBackend::statusMessage() const
+{
+    return ChatPage::instance()->status();
 }
 
 void

@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2010 David Sansome <me@davidsansome.com>
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -154,6 +152,16 @@ directChat(const QString &userId)
         interface.call(QDBus::NoBlock, QStringLiteral("directChat"), userId);
 }
 
+QString
+statusMessage()
+{
+    if (QDBusInterface interface{QStringLiteral(NHEKO_DBUS_SERVICE_NAME), QStringLiteral("/")};
+        interface.isValid())
+        return QDBusReply<QString>{interface.call(QStringLiteral("statusMessage"))}.value();
+    else
+        return {};
+}
+
 void
 setStatusMessage(const QString &message)
 {
@@ -171,7 +179,6 @@ setStatusMessage(const QString &message)
  * http://www.clementine-player.org) and licensed under the GNU General Public
  * License, version 3 or later.
  *
- * SPDX-FileCopyrightText: 2010 David Sansome <me@davidsansome.com>
  */
 QDBusArgument &
 operator<<(QDBusArgument &arg, const QImage &image)

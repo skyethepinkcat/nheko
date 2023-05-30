@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -84,8 +82,10 @@ SingleImagePackModel *
 ImagePackListModel::newPack(bool inRoom)
 {
     ImagePackInfo info{};
-    if (inRoom)
+    if (inRoom) {
         info.source_room = room_id;
+        info.state_key   = SingleImagePackModel::unconflictingStatekey(room_id, "");
+    }
     return new SingleImagePackModel(info);
 }
 

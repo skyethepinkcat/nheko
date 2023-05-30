@@ -1,8 +1,4 @@
-// SPDX-FileCopyrightText: 2017 Konstantinos Sideris <siderisk@auth.gr>
-// SPDX-FileCopyrightText: 2019 The nheko authors
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -68,6 +64,7 @@ public:
     crypto::Trust roomVerificationStatus(const std::string &room_id);
 
     std::vector<std::string> joinedRooms();
+    std::map<std::string, RoomInfo> getCommonRooms(const std::string &user_id);
 
     QMap<QString, RoomInfo> roomInfo(bool withInvites = true);
     QHash<QString, RoomInfo> invites();
@@ -87,6 +84,8 @@ public:
     QString getRoomVersion(lmdb::txn &txn, lmdb::dbi &statesdb);
     //! Retrieve if the room is a space
     bool getRoomIsSpace(lmdb::txn &txn, lmdb::dbi &statesdb);
+    //! Retrieve if the room is tombstoned (closed or replaced by a different room)
+    bool getRoomIsTombstoned(lmdb::txn &txn, lmdb::dbi &statesdb);
 
     //! Get a specific state event
     template<typename T>
@@ -184,26 +183,14 @@ public:
     //! Check if we have sent a desktop notification for the given event id.
     bool isNotificationSent(const std::string &event_id);
 
-    //! retrieve events in timeline and related functions
-    struct Messages
-    {
-        mtx::responses::Timeline timeline;
-        uint64_t next_index;
-        bool end_of_cache = false;
-    };
-    Messages getTimelineMessages(lmdb::txn &txn,
-                                 const std::string &room_id,
-                                 uint64_t index = std::numeric_limits<uint64_t>::max(),
-                                 bool forward   = false);
-
-    std::optional<mtx::events::collections::TimelineEvent>
+    std::optional<mtx::events::collections::TimelineEvents>
     getEvent(const std::string &room_id, std::string_view event_id);
     void storeEvent(const std::string &room_id,
                     const std::string &event_id,
-                    const mtx::events::collections::TimelineEvent &event);
+                    const mtx::events::collections::TimelineEvents &event);
     void replaceEvent(const std::string &room_id,
                       const std::string &event_id,
-                      const mtx::events::collections::TimelineEvent &event);
+                      const mtx::events::collections::TimelineEvents &event);
     std::vector<std::string> relatedEvents(const std::string &room_id, const std::string &event_id);
 
     struct TimelineRange
@@ -222,9 +209,9 @@ public:
     std::string previousBatchToken(const std::string &room_id);
     uint64_t saveOldMessages(const std::string &room_id, const mtx::responses::Messages &res);
     void savePendingMessage(const std::string &room_id,
-                            const mtx::events::collections::TimelineEvent &message);
+                            const mtx::events::collections::TimelineEvents &message);
     std::vector<std::string> pendingEvents(const std::string &room_id);
-    std::optional<mtx::events::collections::TimelineEvent>
+    std::optional<mtx::events::collections::TimelineEvents>
     firstPendingMessage(const std::string &room_id);
     void removePendingStatus(const std::string &room_id, const std::string &txn_id);
 
@@ -313,9 +300,12 @@ public:
     static int compare_state_key(const MDB_val *a, const MDB_val *b)
     {
         auto get_skey = [](const MDB_val *v) {
-            return nlohmann::json::parse(
-                     std::string_view(static_cast<const char *>(v->mv_data), v->mv_size))
-              .value("key", "");
+            auto temp = std::string_view(static_cast<const char *>(v->mv_data), v->mv_size);
+            // allow only passing the state key, in which case no null char will be in it and we
+            // return the whole string because rfind returns npos.
+            // We search from the back, because state keys could include nullbytes, event ids can
+            // not.
+            return temp.substr(0, temp.rfind('\0'));
         };
 
         return get_skey(a).compare(get_skey(b));
@@ -415,13 +405,17 @@ private:
                 break;
             }
             }
+        } else if (auto encr = std::get_if<StateEvent<Encryption>>(&event)) {
+            if (!encr->state_key.empty())
+                return;
 
-            // BUG(Nico): Ideally we would fall through and store this in the database, but it seems
-            // to currently corrupt the db sometimes, so... let's find that bug first!
-            return;
-        } else if (std::holds_alternative<StateEvent<Encryption>>(event)) {
             setEncryptedRoom(txn, room_id);
-            return;
+
+            std::string_view temp;
+            // ensure we don't replace the event in the db
+            if (statesdb.get(txn, to_string(encr->type), temp)) {
+                return;
+            }
         }
 
         std::visit(
@@ -432,28 +426,34 @@ private:
                   if (e.type != EventType::Unsupported) {
                       if (std::is_same_v<std::remove_cv_t<std::remove_reference_t<decltype(e)>>,
                                          StateEvent<mtx::events::msg::Redacted>>) {
-                          if (e.type == EventType::RoomMember)
-                              membersdb.del(txn, e.state_key, "");
-                          else if (e.state_key.empty())
-                              statesdb.del(txn, to_string(e.type));
-                          else
-                              stateskeydb.del(txn,
-                                              to_string(e.type),
-                                              nlohmann::json::object({
-                                                                       {"key", e.state_key},
-                                                                       {"id", e.event_id},
-                                                                     })
-                                                .dump());
-                      } else if (e.state_key.empty())
+                          // apply the redaction event
+                          if (e.type == EventType::RoomMember) {
+                              // membership is not revoked, but names are yeeted (so we set the name
+                              // to the mxid)
+                              MemberInfo tmp{e.state_key, ""};
+                              membersdb.put(txn, e.state_key, nlohmann::json(tmp).dump());
+                          } else if (e.state_key.empty()) {
+                              // strictly speaking some stuff in those events can be redacted, but
+                              // this is close enough. Ref:
+                              // https://spec.matrix.org/v1.6/rooms/v10/#redactions
+                              if (e.type != EventType::RoomCreate &&
+                                  e.type != EventType::RoomJoinRules &&
+                                  e.type != EventType::RoomPowerLevels &&
+                                  e.type != EventType::RoomHistoryVisibility)
+                                  statesdb.del(txn, to_string(e.type));
+                          } else
+                              stateskeydb.del(
+                                txn, to_string(e.type), e.state_key + '\0' + e.event_id);
+                      } else if (e.state_key.empty()) {
                           statesdb.put(txn, to_string(e.type), nlohmann::json(e).dump());
-                      else
-                          stateskeydb.put(txn,
-                                          to_string(e.type),
-                                          nlohmann::json::object({
-                                                                   {"key", e.state_key},
-                                                                   {"id", e.event_id},
-                                                                 })
-                                            .dump());
+                      } else {
+                          auto data = e.state_key + '\0' + e.event_id;
+                          auto key  = to_string(e.type);
+
+                          // Work around https://bugs.openldap.org/show_bug.cgi?id=8447
+                          stateskeydb.del(txn, key, data);
+                          stateskeydb.put(txn, key, data);
+                      }
                   }
               }
           },
@@ -480,9 +480,10 @@ private:
                     return std::nullopt;
                 }
             } else {
-                auto db                   = getStatesKeyDb(txn, room_id);
-                std::string d             = nlohmann::json::object({{"key", state_key}}).dump();
-                std::string_view data     = d;
+                auto db = getStatesKeyDb(txn, room_id);
+                // we can search using state key, since the compare functions defaults to the whole
+                // string, when there is no nullbyte
+                std::string_view data     = state_key;
                 std::string_view typeStrV = typeStr;
 
                 auto cursor = lmdb::cursor::open(txn, db);
@@ -491,9 +492,14 @@ private:
 
                 try {
                     auto eventsDb = getEventsDb(txn, room_id);
-                    if (!eventsDb.get(
-                          txn, nlohmann::json::parse(data)["id"].get<std::string>(), value))
+                    auto eventid  = data;
+                    if (auto sep = data.rfind('\0'); sep != std::string_view::npos) {
+                        if (!eventsDb.get(txn, eventid.substr(sep + 1), value))
+                            return std::nullopt;
+                    } else {
                         return std::nullopt;
+                    }
+
                 } catch (std::exception &) {
                     return std::nullopt;
                 }
@@ -532,10 +538,12 @@ private:
                     first = false;
 
                     try {
-                        if (eventsDb.get(
-                              txn, nlohmann::json::parse(data)["id"].get<std::string>(), value))
-                            events.push_back(
-                              nlohmann::json::parse(value).get<mtx::events::StateEvent<T>>());
+                        auto eventid = data;
+                        if (auto sep = data.rfind('\0'); sep != std::string_view::npos) {
+                            if (eventsDb.get(txn, eventid.substr(sep + 1), value))
+                                events.push_back(
+                                  nlohmann::json::parse(value).get<mtx::events::StateEvent<T>>());
+                        }
                     } catch (std::exception &e) {
                         nhlog::db()->warn("Failed to parse state event: {}", e.what());
                     }
@@ -631,7 +639,7 @@ private:
     lmdb::dbi getStatesKeyDb(lmdb::txn &txn, const std::string &room_id)
     {
         auto db = lmdb::dbi::open(
-          txn, std::string(room_id + "/state_by_key").c_str(), MDB_CREATE | MDB_DUPSORT);
+          txn, std::string(room_id + "/states_key").c_str(), MDB_CREATE | MDB_DUPSORT);
         lmdb::dbi_set_dupsort(txn, db, compare_state_key);
         return db;
     }

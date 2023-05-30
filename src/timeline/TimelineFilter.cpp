@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,6 +41,8 @@ TimelineFilter::startFiltering()
     incrementalSearchIndex = 0;
     emit isFilteringChanged();
     invalidateFilter();
+    beginResetModel();
+    endResetModel();
 
     continueFiltering();
 }

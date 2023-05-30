@@ -1,13 +1,13 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TimelineViewManager.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QFileDialog>
+#include <QMimeData>
 #include <QStandardPaths>
 #include <QString>
 
@@ -17,6 +17,7 @@
 #include "CommandCompleter.h"
 #include "CompletionProxyModel.h"
 #include "EventAccessors.h"
+#include "GridImagePackModel.h"
 #include "ImagePackListModel.h"
 #include "InviteesModel.h"
 #include "Logging.h"
@@ -26,12 +27,9 @@
 #include "UserSettingsPage.h"
 #include "UsersModel.h"
 #include "Utils.h"
-#include "emoji/EmojiModel.h"
 #include "encryption/VerificationManager.h"
 #include "voip/CallManager.h"
 #include "voip/WebRTCSession.h"
-
-namespace msgs = mtx::events::msg;
 
 namespace {
 template<template<class...> class Op, class... Args>
@@ -182,7 +180,7 @@ TimelineViewManager::openRoomSettings(QString room_id)
 void
 TimelineViewManager::openInviteUsers(QString roomId)
 {
-    InviteesModel *model = new InviteesModel{};
+    InviteesModel *model = new InviteesModel{rooms_->getRoomById(roomId).data()};
     connect(model, &InviteesModel::accept, this, [this, model, roomId]() {
         emit inviteUsers(roomId, model->mxids());
     });
@@ -321,6 +319,37 @@ TimelineViewManager::saveMedia(QString mxcUrl)
 }
 
 void
+TimelineViewManager::copyImage(const QString &mxcUrl) const
+{
+    const auto url = mxcUrl.toStdString();
+    QString mimeType;
+
+    http::client()->download(
+      url,
+      [url, mimeType](const std::string &data,
+                      const std::string &,
+                      const std::string &,
+                      mtx::http::RequestErr err) {
+          if (err) {
+              nhlog::net()->warn("failed to retrieve media {}: {} {}",
+                                 url,
+                                 err->matrix_error.error,
+                                 static_cast<int>(err->status_code));
+              return;
+          }
+
+          try {
+              auto img = utils::readImage(QByteArray(data.data(), (qsizetype)data.size()));
+              QGuiApplication::clipboard()->setImage(img);
+
+              return;
+          } catch (const std::exception &e) {
+              nhlog::ui()->warn("Error while copying file to clipboard: {}", e.what());
+          }
+      });
+}
+
+void
 TimelineViewManager::updateReadReceipts(const QString &room_id,
                                         const std::vector<QString> &event_ids)
 {
@@ -424,13 +453,8 @@ TimelineViewManager::completerFor(const QString &completerName, const QString &r
         userModel->setParent(proxy);
         return proxy;
     } else if (completerName == QLatin1String("emoji")) {
-        auto emojiModel = new emoji::EmojiModel();
+        auto emojiModel = new CombinedImagePackModel(roomId.toStdString());
         auto proxy      = new CompletionProxyModel(emojiModel);
-        emojiModel->setParent(proxy);
-        return proxy;
-    } else if (completerName == QLatin1String("allemoji")) {
-        auto emojiModel = new emoji::EmojiModel();
-        auto proxy      = new CompletionProxyModel(emojiModel, 1, static_cast<size_t>(-1) / 4);
         emojiModel->setParent(proxy);
         return proxy;
     } else if (completerName == QLatin1String("room")) {
@@ -443,16 +467,12 @@ TimelineViewManager::completerFor(const QString &completerName, const QString &r
         auto proxy     = new CompletionProxyModel(roomModel);
         roomModel->setParent(proxy);
         return proxy;
-    } else if (completerName == QLatin1String("stickers")) {
-        auto stickerModel = new CombinedImagePackModel(roomId.toStdString(), true);
-        auto proxy        = new CompletionProxyModel(stickerModel, 1, static_cast<size_t>(-1) / 4);
-        stickerModel->setParent(proxy);
-        return proxy;
-    } else if (completerName == QLatin1String("customEmoji")) {
-        auto stickerModel = new CombinedImagePackModel(roomId.toStdString(), false);
-        auto proxy        = new CompletionProxyModel(stickerModel);
-        stickerModel->setParent(proxy);
-        return proxy;
+    } else if (completerName == QLatin1String("emojigrid")) {
+        auto stickerModel = new GridImagePackModel(roomId.toStdString(), false);
+        return stickerModel;
+    } else if (completerName == QLatin1String("stickergrid")) {
+        auto stickerModel = new GridImagePackModel(roomId.toStdString(), true);
+        return stickerModel;
     } else if (completerName == QLatin1String("command")) {
         auto commandCompleter = new CommandCompleter();
         auto proxy            = new CompletionProxyModel(commandCompleter);
@@ -463,7 +483,7 @@ TimelineViewManager::completerFor(const QString &completerName, const QString &r
 }
 
 void
-TimelineViewManager::forwardMessageToRoom(mtx::events::collections::TimelineEvents *e,
+TimelineViewManager::forwardMessageToRoom(mtx::events::collections::TimelineEvents const *e,
                                           QString roomId)
 {
     auto room                                                = rooms_->getRoomById(roomId);

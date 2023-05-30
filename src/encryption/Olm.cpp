@@ -1,6 +1,4 @@
-// SPDX-FileCopyrightText: 2021 Nheko Contributors
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -1262,7 +1260,7 @@ decryptEvent(const MegolmSessionIndex &index,
     } catch (const lmdb::error &e) {
         return {DecryptionErrorCode::DbError, e.what(), std::nullopt};
     } catch (const mtx::crypto::olm_exception &e) {
-        if (e.error_code() == mtx::crypto::OlmErrorCode::UNKNOWN_MESSAGE_INDEX)
+        if (e.error_code() == mtx::crypto::OlmErrorCode::OLM_UNKNOWN_MESSAGE_INDEX)
             return {DecryptionErrorCode::MissingSessionIndex, e.what(), std::nullopt};
         return {DecryptionErrorCode::DecryptionFailed, e.what(), std::nullopt};
     }
@@ -1275,13 +1273,13 @@ decryptEvent(const MegolmSessionIndex &index,
         body["origin_server_ts"] = event.origin_server_ts;
         body["unsigned"]         = event.unsigned_data;
 
-        mtx::events::collections::TimelineEvent te;
-        from_json(body, te);
+        mtx::events::collections::TimelineEvents te =
+          body.get<mtx::events::collections::TimelineEvents>();
 
         // relations are unencrypted in content...
-        mtx::accessors::set_relations(te.data, std::move(event.content.relations));
+        mtx::accessors::set_relations(te, std::move(event.content.relations));
 
-        return {DecryptionErrorCode::NoError, std::nullopt, std::move(te.data)};
+        return {DecryptionErrorCode::NoError, std::nullopt, std::move(te)};
     } catch (std::exception &e) {
         return {DecryptionErrorCode::ParsingFailed, e.what(), std::nullopt};
     }

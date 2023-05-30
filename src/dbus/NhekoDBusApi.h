@@ -1,5 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Nheko Contributors
-// SPDX-FileCopyrightText: 2023 Nheko Contributors
+// SPDX-FileCopyrightText: Nheko Contributors
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -81,6 +80,9 @@ joinRoom(const QString &alias);
 //! desired).
 void
 directChat(const QString &userId);
+//! Get the user's status message.
+QString
+statusMessage();
 //! Sets the user's status message (if supported by the homeserver).
 void
 setStatusMessage(const QString &message);
