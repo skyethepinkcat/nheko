@@ -1467,7 +1467,7 @@ utils::updateSpaceVias()
                               ChatPage::instance()->callFunctionOnGuiThread(
                                 [state    = std::move(state),
                                  interval = e->matrix_error.retry_after]() {
-                                    QTimer::singleShot(interval,
+                                    QTimer::singleShot(interval * 3,
                                                        ChatPage::instance(),
                                                        [self = std::move(state)]() mutable {
                                                            next(std::move(self));
@@ -1502,7 +1502,7 @@ utils::updateSpaceVias()
                               ChatPage::instance()->callFunctionOnGuiThread(
                                 [state    = std::move(state),
                                  interval = e->matrix_error.retry_after]() {
-                                    QTimer::singleShot(interval,
+                                    QTimer::singleShot(interval * 3,
                                                        ChatPage::instance(),
                                                        [self = std::move(state)]() mutable {
                                                            next(std::move(self));
@@ -1642,10 +1642,21 @@ utils::removeExpiredEvents()
         std::string filter;
 
         std::string currentRoom;
+        bool firstMessagesCall         = true;
         std::uint64_t currentRoomCount = 0;
+
+        // batch token for pagination
         std::string currentRoomPrevToken;
+        // event id of an event redacted in a previous run
+        std::string currentRoomStopAt;
+        // event id of first event redacted in the current run, hoping that the order stays the
+        // same.
+        std::string currentRoomFirstRedactedEvent;
+        // (evtype,state_key) tuple to keep the latest state event of each.
         std::set<std::pair<std::string, std::string>> currentRoomStateEvents;
+        // event ids pending redaction
         std::vector<std::string> currentRoomRedactionQueue;
+
         mtx::events::account_data::nheko_extensions::EventExpiry currentExpiry;
 
         static void next(std::shared_ptr<ApplyEventExpiration> state)
@@ -1663,7 +1674,8 @@ utils::removeExpiredEvents()
                               ChatPage::instance()->callFunctionOnGuiThread(
                                 [state    = std::move(state),
                                  interval = e->matrix_error.retry_after]() {
-                                    QTimer::singleShot(interval,
+                                    // triple interval to allow other traffic as well
+                                    QTimer::singleShot(interval * 3,
                                                        ChatPage::instance(),
                                                        [self = std::move(state)]() mutable {
                                                            next(std::move(self));
@@ -1680,11 +1692,29 @@ utils::removeExpiredEvents()
                           }
                       } else {
                           nhlog::net()->info("Redacted event {} in {}", evid, state->currentRoom);
+
+                          if (state->currentRoomFirstRedactedEvent.empty())
+                              state->currentRoomFirstRedactedEvent = evid;
+
                           state->currentRoomRedactionQueue.pop_back();
                           next(std::move(state));
                       }
                   });
             } else if (!state->currentRoom.empty()) {
+                if (state->currentRoomPrevToken.empty() && !state->firstMessagesCall) {
+                    nhlog::net()->info("Finished room {}", state->currentRoom);
+
+                    if (!state->currentRoomFirstRedactedEvent.empty())
+                        cache::client()->storeEventExpirationProgress(
+                          state->currentRoom,
+                          nlohmann::json(state->currentExpiry).dump(),
+                          state->currentRoomFirstRedactedEvent);
+
+                    state->currentRoom.clear();
+                    next(std::move(state));
+                    return;
+                }
+
                 mtx::http::MessagesOpts opts{};
                 opts.dir     = mtx::http::PaginationDirection::Backwards;
                 opts.from    = state->currentRoomPrevToken;
@@ -1692,17 +1722,21 @@ utils::removeExpiredEvents()
                 opts.filter  = state->filter;
                 opts.room_id = state->currentRoom;
 
+                state->firstMessagesCall = false;
+
                 http::client()->messages(
                   opts,
                   [state = std::move(state)](const mtx::responses::Messages &msgs,
                                              mtx::http::RequestErr error) mutable {
-                      if (error || msgs.chunk.empty()) {
+                      if (error) {
+                          // skip success handler
+                          nhlog::net()->warn(
+                            "Finished room {} with error {}", state->currentRoom, *error);
                           state->currentRoom.clear();
-                          state->currentRoomCount = 0;
+                      } else if (msgs.chunk.empty()) {
                           state->currentRoomPrevToken.clear();
                       } else {
-                          if (!msgs.end.empty())
-                              state->currentRoomPrevToken = msgs.end;
+                          state->currentRoomPrevToken = msgs.end;
 
                           auto now = (uint64_t)QDateTime::currentMSecsSinceEpoch();
                           auto us  = http::client()->user_id().to_string();
@@ -1713,11 +1747,34 @@ utils::removeExpiredEvents()
                                   continue;
 
                               if (std::holds_alternative<
-                                    mtx::events::RoomEvent<mtx::events::msg::Redacted>>(e))
+                                    mtx::events::RoomEvent<mtx::events::msg::Redacted>>(e) ||
+                                  std::holds_alternative<
+                                    mtx::events::StateEvent<mtx::events::msg::Redacted>>(e)) {
+                                  if (!state->currentRoomStopAt.empty() &&
+                                      mtx::accessors::event_id(e) == state->currentRoomStopAt) {
+                                      // There is no filter to remove redacted events from
+                                      // pagination, so we try to stop early by caching what event
+                                      // we redacted last if we reached the end of a room.
+                                      nhlog::net()->info(
+                                        "Found previous redaction marker, stopping early: {}",
+                                        state->currentRoom);
+                                      state->currentRoomPrevToken.clear();
+                                      break;
+                                  }
                                   continue;
+                              }
 
                               if (std::holds_alternative<
                                     mtx::events::StateEvent<mtx::events::msg::Redacted>>(e))
+                                  continue;
+
+                              // synapse protects these 2 against redaction
+                              if (std::holds_alternative<
+                                    mtx::events::StateEvent<mtx::events::state::Create>>(e))
+                                  continue;
+
+                              if (std::holds_alternative<
+                                    mtx::events::StateEvent<mtx::events::state::ServerAcl>>(e))
                                   continue;
 
                               // skip events we don't know to protect us from mistakes.
@@ -1746,7 +1803,7 @@ utils::removeExpiredEvents()
                                                   .emplace(to_string(se.type), se.state_key)
                                                   .second;
                                             else
-                                                return false;
+                                                return true;
                                         },
                                         e))
                                       continue;
@@ -1766,13 +1823,6 @@ utils::removeExpiredEvents()
                           }
                       }
 
-                      if (msgs.end.empty() && state->currentRoomRedactionQueue.empty()) {
-                          state->currentRoom.clear();
-                          state->currentRoomCount = 0;
-                          state->currentRoomPrevToken.clear();
-                          state->currentRoomStateEvents.clear();
-                      }
-
                       next(std::move(state));
                   });
             } else if (!state->roomsToUpdate.empty()) {
@@ -1786,6 +1836,15 @@ utils::removeExpiredEvents()
                     state->currentRoom   = room;
                     state->currentExpiry = state->globalExpiry->content;
                 }
+                state->firstMessagesCall    = true;
+                state->currentRoomCount     = 0;
+                state->currentRoomPrevToken = "";
+                state->currentRoomRedactionQueue.clear();
+                state->currentRoomStateEvents.clear();
+
+                state->currentRoomStopAt = cache::client()->loadEventExpirationProgress(
+                  state->currentRoom, nlohmann::json(state->currentExpiry).dump());
+
                 state->roomsToUpdate.pop_back();
                 next(std::move(state));
             } else {

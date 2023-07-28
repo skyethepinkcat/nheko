@@ -83,6 +83,8 @@ static constexpr auto DEVICES_DB("devices");
 static constexpr auto DEVICE_KEYS_DB("device_keys");
 //! room_ids that have encryption enabled.
 static constexpr auto ENCRYPTED_ROOMS_DB("encrypted_rooms");
+//! Expiration progress for each room
+static constexpr auto EVENT_EXPIRATION_BG_JOB_DB("event_expiration_bg_job");
 
 //! room_id -> pickled OlmInboundGroupSession
 static constexpr auto INBOUND_MEGOLM_SESSIONS_DB("inbound_megolm_sessions");
@@ -328,7 +330,9 @@ Cache::setup()
     megolmSessionDataDb_     = lmdb::dbi::open(txn, MEGOLM_SESSIONS_DATA_DB, MDB_CREATE);
 
     // What rooms are encrypted
-    encryptedRooms_                      = lmdb::dbi::open(txn, ENCRYPTED_ROOMS_DB, MDB_CREATE);
+    encryptedRooms_   = lmdb::dbi::open(txn, ENCRYPTED_ROOMS_DB, MDB_CREATE);
+    eventExpiryBgJob_ = lmdb::dbi::open(txn, EVENT_EXPIRATION_BG_JOB_DB, MDB_CREATE);
+
     [[maybe_unused]] auto verificationDb = getVerificationDb(txn);
     [[maybe_unused]] auto userKeysDb     = getUserKeysDb(txn);
 
@@ -583,6 +587,39 @@ Cache::pickleSecret()
     }
 
     return pickle_secret_;
+}
+
+void
+Cache::storeEventExpirationProgress(const std::string &room,
+                                    const std::string &expirationSettings,
+                                    const std::string &stopMarker)
+{
+    nlohmann::json j;
+    j["s"] = expirationSettings;
+    j["m"] = stopMarker;
+
+    auto txn = lmdb::txn::begin(env_);
+    eventExpiryBgJob_.put(txn, room, j.dump());
+    txn.commit();
+}
+
+std::string
+Cache::loadEventExpirationProgress(const std::string &room, const std::string &expirationSettings)
+
+{
+    try {
+        auto txn = ro_txn(env_);
+        std::string_view data;
+        if (!eventExpiryBgJob_.get(txn, room, data))
+            return "";
+
+        auto j = nlohmann::json::parse(data);
+        if (j.value("s", "") == expirationSettings)
+            return j.value("m", "");
+    } catch (...) {
+        return "";
+    }
+    return "";
 }
 
 void
@@ -3596,6 +3633,19 @@ Cache::saveTimelineMessages(lmdb::txn &txn,
             if (redaction->redacts.empty())
                 continue;
 
+            // persist the first redaction in case this is a limited timeline and it is the first
+            // event to not break pagination.
+            if (first && res.limited) {
+                first = false;
+                ++index;
+
+                nhlog::db()->debug("saving redaction '{}'", orderEntry.dump());
+
+                cursor.put(lmdb::to_sv(index), orderEntry.dump(), MDB_APPEND);
+                evToOrderDb.put(txn, event_id, lmdb::to_sv(index));
+                eventsDb.put(txn, event_id, event.dump());
+            }
+
             std::string_view oldEvent;
             bool success = eventsDb.get(txn, redaction->redacts, oldEvent);
             if (!success)
@@ -3643,13 +3693,13 @@ Cache::saveTimelineMessages(lmdb::txn &txn,
             eventsDb.put(txn, redaction->redacts, event.dump());
             eventsDb.put(txn, redaction->event_id, nlohmann::json(*redaction).dump());
         } else {
-            first = false;
-
             // This check protects against duplicates in the timeline. If the event_id
             // is already in the DB, we skip putting it (again) in ordered DBs, and only
             // update the event itself and its relations.
             std::string_view unused_read;
             if (!evToOrderDb.get(txn, event_id, unused_read)) {
+                first = false;
+
                 ++index;
 
                 nhlog::db()->debug("saving '{}'", orderEntry.dump());
@@ -3762,10 +3812,27 @@ Cache::saveOldMessages(const std::string &room_id, const mtx::responses::Message
         }
     }
 
-    nlohmann::json orderEntry = nlohmann::json::object();
-    orderEntry["event_id"]    = event_id_val;
-    orderEntry["prev_batch"]  = res.end;
-    orderDb.put(txn, lmdb::to_sv(index), orderEntry.dump());
+    if (!event_id_val.empty()) {
+        nlohmann::json orderEntry = nlohmann::json::object();
+        orderEntry["event_id"]    = event_id_val;
+        orderEntry["prev_batch"]  = res.end;
+        orderDb.put(txn, lmdb::to_sv(index), orderEntry.dump());
+    } else if (!res.chunk.empty()) {
+        // to not break pagination, even if all events are redactions we try to persist something in
+        // the batch.
+
+        nlohmann::json orderEntry = nlohmann::json::object();
+        event_id_val              = mtx::accessors::event_id(res.chunk.back());
+        --index;
+
+        auto event = mtx::accessors::serialize_event(res.chunk.back()).dump();
+        eventsDb.put(txn, event_id_val, event);
+        evToOrderDb.put(txn, event_id_val, lmdb::to_sv(index));
+
+        orderEntry["event_id"]   = event_id_val;
+        orderEntry["prev_batch"] = res.end;
+        orderDb.put(txn, lmdb::to_sv(index), orderEntry.dump());
+    }
 
     txn.commit();
 

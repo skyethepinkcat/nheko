@@ -353,8 +353,6 @@ set(SRC_FILES
 	# Dialogs
 	src/dialogs/FallbackAuth.cpp
 	src/dialogs/FallbackAuth.h
-	src/dialogs/ReCaptcha.cpp
-	src/dialogs/ReCaptcha.h
 
 	# Emoji
 	src/emoji/Provider.cpp
@@ -487,6 +485,8 @@ set(SRC_FILES
 	src/PowerlevelsEditModels.h
 	src/ReadReceiptsModel.cpp
 	src/ReadReceiptsModel.h
+	src/ReCaptcha.cpp
+	src/ReCaptcha.h
 	src/RegisterPage.cpp
 	src/RegisterPage.h
 	src/RoomDirectoryModel.cpp
@@ -693,13 +693,6 @@ set_target_properties(nheko
 		AUTOMOC ON)
 
 #
-# Bundle translations
-#
-file(GLOB LANG_TS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/resources/langs/*.ts")
-qt_add_translations(nheko RESOURCE_PREFIX "/translations" TS_FILES ${LANG_TS_SRC})
-
-
-#
 # Add qml files
 #
 
@@ -779,6 +772,7 @@ set(QML_SOURCES
         resources/qml/dialogs/PowerLevelSpacesApplyDialog.qml
         resources/qml/dialogs/RawMessageDialog.qml
         resources/qml/dialogs/ReadReceipts.qml
+        resources/qml/dialogs/ReCaptchaDialog.qml
         resources/qml/dialogs/RoomDirectory.qml
         resources/qml/dialogs/RoomMembers.qml
         resources/qml/dialogs/AllowedRoomsSettingsDialog.qml
@@ -821,6 +815,14 @@ qt_add_qml_module(nheko
 	#qt_target_qml_sources(nheko
 	#	#PREFIX "/"
 	#)
+
+
+#
+# Bundle translations
+#
+file(GLOB LANG_TS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/resources/langs/*.ts")
+qt_add_translations(nheko RESOURCE_PREFIX "/translations" TS_FILES
+	${LANG_TS_SRC} SOURCES ${QML_SOURCES} ${SRC_FILES})
 
 
 if(WIN32)
