@@ -350,10 +350,6 @@ configure_file(cmake/nheko.h config/nheko.h)
 # Declare source and header files.
 #
 set(SRC_FILES
-	# Dialogs
-	src/dialogs/FallbackAuth.cpp
-	src/dialogs/FallbackAuth.h
-
 	# Emoji
 	src/emoji/Provider.cpp
 	src/emoji/Provider.h
@@ -463,6 +459,8 @@ set(SRC_FILES
 	src/Config.h
 	src/EventAccessors.cpp
 	src/EventAccessors.h
+        src/FallbackAuth.cpp
+        src/FallbackAuth.h
 	src/ImagePackListModel.cpp
 	src/ImagePackListModel.h
 	src/InviteesModel.cpp
@@ -601,7 +599,7 @@ if(USE_BUNDLED_MTXCLIENT)
 	FetchContent_Declare(
 		MatrixClient
                 GIT_REPOSITORY https://github.com/Nheko-Reborn/mtxclient.git
-                GIT_TAG        0a4cc9421a97bea81a8921f3f5e040f0a34278fc
+                GIT_TAG        928ac33a0d0359464ac37716559a687fdc39f0de
 		)
 	set(BUILD_LIB_EXAMPLES OFF CACHE INTERNAL "")
 	set(BUILD_LIB_TESTS OFF CACHE INTERNAL "")
@@ -731,6 +729,7 @@ set(QML_SOURCES
         resources/qml/components/MainWindowDialog.qml
         resources/qml/components/NhekoTabButton.qml
         resources/qml/components/NotificationBubble.qml
+        resources/qml/components/PowerlevelIndicator.qml
         resources/qml/components/ReorderableListview.qml
         resources/qml/components/SpaceMenuLevel.qml
         resources/qml/components/TextButton.qml
@@ -757,8 +756,9 @@ set(QML_SOURCES
         resources/qml/dialogs/ConfirmJoinRoomDialog.qml
         resources/qml/dialogs/CreateDirect.qml
         resources/qml/dialogs/CreateRoom.qml
+        resources/qml/dialogs/FallbackAuthDialog.qml
         resources/qml/dialogs/HiddenEventsDialog.qml
-				resources/qml/dialogs/EventExpirationDialog.qml
+        resources/qml/dialogs/EventExpirationDialog.qml
         resources/qml/dialogs/ImageOverlay.qml
         resources/qml/dialogs/ImagePackEditorDialog.qml
         resources/qml/dialogs/ImagePackSettingsDialog.qml
